@@ -44,10 +44,10 @@ class FinnhubProvider(MarketDataProvider):
                         data = res.json()
                         current_price = Decimal(str(data.get("c", 0.0)))
                         if current_price > 0:
-                            # Typical standard spread approx 1.2 pips
-                            bid = current_price - Decimal("0.00006")
-                            ask = current_price + Decimal("0.00006")
-                            spread_pips = price_diff_to_pips(sym, ask - bid)
+                            spread_delta = Decimal("0.00012") if "JPY" not in sym else Decimal("0.012")
+                            bid = current_price - (spread_delta / Decimal("2"))
+                            ask = current_price + (spread_delta / Decimal("2"))
+                            spread_pips = price_diff_to_pips(ask - bid, sym)
                             results.append(
                                 MarketTick(
                                     symbol=sym.replace("/", "_"),
@@ -106,3 +106,36 @@ class FinnhubProvider(MarketDataProvider):
             for tick in ticks:
                 yield tick
             await asyncio.sleep(1.0)
+
+
+class FinnhubNewsProvider:
+    """Finnhub News Provider for live macroeconomic Forex news."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or getattr(settings, "FINNHUB_API_KEY", "")
+        self.base_url = "https://finnhub.io/api/v1"
+
+    async def fetch_latest_news(self, query: str = "forex", limit: int = 20) -> List[dict]:
+        if not self.api_key:
+            return []
+        url = f"{self.base_url}/news?category=forex&token={self.api_key}"
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            try:
+                res = await client.get(url)
+                if res.status_code == 200:
+                    items = res.json()
+                    articles = []
+                    for item in items[:limit]:
+                        articles.append({
+                            "id": str(item.get("id", "")),
+                            "headline": item.get("headline", ""),
+                            "summary": item.get("summary", ""),
+                            "source": item.get("source", "Finnhub"),
+                            "url": item.get("url", ""),
+                            "datetime": datetime.fromtimestamp(item.get("datetime", 0), tz=timezone.utc).isoformat(),
+                        })
+                    return articles
+            except Exception as e:
+                logger.warning(f"Finnhub news error: {e}")
+        return []
+

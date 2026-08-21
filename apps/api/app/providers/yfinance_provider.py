@@ -35,9 +35,10 @@ class YahooFinanceProvider(MarketDataProvider):
                         meta = data["chart"]["result"][0]["meta"]
                         price = Decimal(str(meta.get("regularMarketPrice", 0.0)))
                         if price > 0:
-                            bid = price - Decimal("0.00008")
-                            ask = price + Decimal("0.00008")
-                            spread_pips = price_diff_to_pips(sym, ask - bid)
+                            spread_delta = Decimal("0.00012") if "JPY" not in sym else Decimal("0.012")
+                            bid = price - (spread_delta / Decimal("2"))
+                            ask = price + (spread_delta / Decimal("2"))
+                            spread_pips = price_diff_to_pips(ask - bid, sym)
                             results.append(
                                 MarketTick(
                                     symbol=sym.replace("/", "_"),
