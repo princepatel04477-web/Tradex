@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # LLM & AI Providers
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "llama3-70b-8192"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     PERPLEXITY_API_KEY: Optional[str] = None
