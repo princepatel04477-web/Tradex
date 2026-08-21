@@ -27,6 +27,13 @@
 
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
+> **This fork also contains Tradly and the Forex Top-Down Confluence Toolkit.**
+> `backend/` + `frontend/` implement the Tradly platform ([SRS](Tradly_SRS.md)) and a
+> rule-based price-action strategy engine built from [these notes](Forex_Trading_Notes.md).
+> See **[STRATEGY_TOOLKIT.md](STRATEGY_TOOLKIT.md)** for how to run it, where each
+> module lives, and the open questions that need confirming.
+
+
 ## News
 - [2026-06] **TradingAgents v0.3.0** released with a verified data-access contract, an expanded provider registry (NVIDIA, Kimi, Groq, Mistral, Bedrock, and any OpenAI-compatible endpoint), FRED and Polymarket data vendors, a current-generation model catalog, and a CI gate. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 - [2026-05] **TradingAgents v0.2.5** released with the grounded Sentiment Analyst, GPT-5.5 etc. model coverage, Qwen/GLM/MiniMax dual-region support, `TRADINGAGENTS_*` env-var configurability with API-key auto-detection, remote Ollama support, non-US alpha benchmarks, and ticker path-traversal hardening.
