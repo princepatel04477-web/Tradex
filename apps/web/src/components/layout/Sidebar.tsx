@@ -10,6 +10,7 @@ import {
 
 const NAV_ITEMS = [
   { name: "Command Center", href: "/", icon: LayoutDashboard },
+  { name: "Analysis Workspace", href: "/trading-analysis", icon: CandlestickChart },
   { name: "Interactive Chart", href: "/chart", icon: CandlestickChart },
   { name: "AI Assistant (RAG)", href: "/ai-assistant", icon: Bot },
   { name: "Paper Trading", href: "/paper-trading", icon: DollarSign },
