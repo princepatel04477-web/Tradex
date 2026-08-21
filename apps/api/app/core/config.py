@@ -28,13 +28,11 @@ class Settings(BaseSettings):
         "https://tradly.vercel.app",
     ]
 
-    # Database (Supabase PostgreSQL with pgvector)
+    # Database (Neon PostgreSQL with pgvector)
     DATABASE_URL: Optional[str] = "postgresql://tradly:tradlypass@localhost:5432/tradly"
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
-    SUPABASE_ANON_KEY: Optional[str] = None
-    DB_POOL_MIN_SIZE: int = 5
-    DB_POOL_MAX_SIZE: int = 20
+    DIRECT_URL: Optional[str] = None
+    DB_POOL_MIN_SIZE: int = 2
+    DB_POOL_MAX_SIZE: int = 10
 
     # Hot Cache & Task Broker (Redis)
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -48,7 +46,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # Market Data Providers (OANDA v20)
+    # Market Data Providers (yahoo, finnhub, oanda, fake)
+    MARKET_DATA_PROVIDER: str = "yahoo"
+    FINNHUB_API_KEY: Optional[str] = None
     OANDA_API_KEY: Optional[str] = None
     OANDA_ACCOUNT_ID: Optional[str] = None
     OANDA_ENVIRONMENT: str = "practice"  # practice or live

@@ -7,8 +7,11 @@ import random
 
 from app.domain.pips import get_pip_size, price_diff_to_pips
 from app.domain.sessions import get_market_sessions_overview
+from app.core.config import settings
 from app.providers.base import MarketDataProvider, MarketTick
 from app.providers.fakes import FakeMarketDataProvider, BASE_PRICES
+from app.providers.yfinance_provider import YahooFinanceProvider
+from app.providers.finnhub import FinnhubProvider
 from app.schemas.market import Candle, CurrencyPair, MarketSessionOverview, Tick
 
 PAIRS_METADATA = [
@@ -32,7 +35,14 @@ PAIRS_METADATA = [
 
 class MarketService:
     def __init__(self, provider: Optional[MarketDataProvider] = None):
-        self.provider = provider or FakeMarketDataProvider()
+        if provider:
+            self.provider = provider
+        elif settings.MARKET_DATA_PROVIDER == "yahoo":
+            self.provider = YahooFinanceProvider()
+        elif settings.MARKET_DATA_PROVIDER == "finnhub":
+            self.provider = FinnhubProvider()
+        else:
+            self.provider = FakeMarketDataProvider()
         self.prices: Dict[str, dict] = {}
         self.candles_cache: Dict[str, Dict[str, List[Candle]]] = {}
         self._init_market_state()
