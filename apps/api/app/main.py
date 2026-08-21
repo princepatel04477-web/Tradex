@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import json
 import time
 import uuid
@@ -17,7 +18,7 @@ from app.core.config import settings
 from app.core.envelope import ApiResponse
 from app.core.errors import TradlyException
 from app.core.logging import logger, set_correlation_id
-from app.repositories.base import close_db_pool, init_db_pool
+from app.repositories.base import close_db_pool, init_db_pool, get_db_pool
 from app.services.alert_service import alert_service
 from app.services.market_service import market_service
 from app.services.trading_service import trading_service
@@ -52,7 +53,35 @@ app.add_middleware(
 )
 
 
-# 2. Correlation ID & Security Headers Middleware
+# ---------------------------------------------------------------------------
+# Root & Health Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "Tradly Forex Intelligence API Gateway",
+        "status": "healthy",
+        "version": settings.APP_VERSION,
+        "docs_url": "/docs",
+        "api_v1": "/api/v1",
+    }
+
+
+@app.get("/health", response_model=ApiResponse[dict])
+async def health_check() -> ApiResponse[dict]:
+    return ApiResponse.success({
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "database": "connected" if get_db_pool() else "in_memory_fallback",
+        "market_provider": settings.MARKET_DATA_PROVIDER,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Middleware: Security Headers, Request Tracing, and CORS
+# ---------------------------------------------------------------------------
 @app.middleware("http")
 async def correlation_and_security_middleware(request: Request, call_next):
     corr_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
