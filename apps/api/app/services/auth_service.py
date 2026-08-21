@@ -4,26 +4,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from app.core.errors import AuthenticationError, ConflictError
+from app.core.errors import AuthenticationError, ConflictError, ForbiddenError
 from app.core.logging import logger
 from app.core.security import create_access_token, hash_password, verify_password
 from app.repositories.base import get_db_pool
 from app.schemas.auth import TokenResponse, UserCreate, UserLogin, UserProfile
 
+# Secret master invitation code required to create any new user account
+MASTER_INVITE_CODE = "TRADLY_PRINCE_2026"
+
 
 class AuthService:
     def __init__(self):
         self.in_memory_users: Dict[str, dict] = {}
-        # Seed demo user in-memory
-        demo_id = "00000000-0000-0000-0000-000000000001"
-        self.in_memory_users["demo@tradly.ai"] = {
-            "id": demo_id,
-            "email": "demo@tradly.ai",
-            "name": "Demo Trader",
-            "hashed_password": hash_password("TradlyDemo2026!"),
-            "role": "authenticated",
-            "created_at": datetime.now(timezone.utc),
-        }
         # Seed VIP Master Account
         vip_id = "9dca1422-efd3-4f9f-a96f-b9a34d6b4ccd"
         self.in_memory_users["princepatel01258@gmail.com"] = {
@@ -36,6 +29,10 @@ class AuthService:
         }
 
     async def register(self, req: UserCreate) -> TokenResponse:
+        # Require valid administrator invite code
+        if not req.invite_code or req.invite_code.strip() != MASTER_INVITE_CODE:
+            raise ForbiddenError("Registration is restricted. A valid master administrator invitation code is required.")
+
         email = req.email.strip().lower()
         pool = get_db_pool()
 
@@ -79,7 +76,7 @@ class AuthService:
                             created_at=now,
                         ),
                     )
-            except ConflictError:
+            except (ConflictError, ForbiddenError):
                 raise
             except Exception as e:
                 logger.warning(f"Database user insert failed ({e}), falling back to in-memory store")

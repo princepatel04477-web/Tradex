@@ -33,6 +33,9 @@ class AuthorizationError(TradlyException):
         super().__init__(message=message, code="FORBIDDEN", status_code=403)
 
 
+ForbiddenError = AuthorizationError
+
+
 class InsufficientMarginError(TradlyException):
     def __init__(self, required: str, available: str):
         message = f"Insufficient Free Margin: order requires ${required}, but only ${available} is available."

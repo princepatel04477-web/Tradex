@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
     password: str
     name: Optional[str] = None
     full_name: Optional[str] = None
+    invite_code: Optional[str] = None
 
 
 class UserRegister(UserCreate):

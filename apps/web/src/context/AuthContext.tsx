@@ -15,11 +15,8 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<void>;
-  register: (name: string, email: string, pass: string) => Promise<void>;
+  register: (name: string, email: string, pass: string, inviteCode?: string) => Promise<void>;
   logout: () => void;
-  isAuthModalOpen: boolean;
-  openAuthModal: () => void;
-  closeAuthModal: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,7 +25,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     const savedToken = typeof window !== "undefined" ? localStorage.getItem("tradly_token") : null;
@@ -50,12 +46,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pass }),
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password: pass }),
     });
 
     const json = await res.json();
     if (!res.ok || json.error) {
-      throw new Error(json.error?.message || "Invalid credentials");
+      throw new Error(json.error?.message || "Invalid operator credentials");
     }
 
     const authData = json.data;
@@ -65,19 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("tradly_token", authData.access_token);
       localStorage.setItem("tradly_user", JSON.stringify(authData.user));
     }
-    setIsAuthModalOpen(false);
   };
 
-  const register = async (name: string, email: string, pass: string) => {
+  const register = async (name: string, email: string, pass: string, inviteCode?: string) => {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password: pass }),
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password: pass,
+        invite_code: inviteCode?.trim(),
+      }),
     });
 
     const json = await res.json();
     if (!res.ok || json.error) {
-      throw new Error(json.error?.message || "Registration failed");
+      throw new Error(json.error?.message || "Registration failed. Valid invite code required.");
     }
 
     const authData = json.data;
@@ -87,7 +87,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("tradly_token", authData.access_token);
       localStorage.setItem("tradly_user", JSON.stringify(authData.user));
     }
-    setIsAuthModalOpen(false);
   };
 
   const logout = () => {
@@ -108,9 +107,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
-        isAuthModalOpen,
-        openAuthModal: () => setIsAuthModalOpen(true),
-        closeAuthModal: () => setIsAuthModalOpen(false),
       }}
     >
       {children}

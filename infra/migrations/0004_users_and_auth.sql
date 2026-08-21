@@ -15,13 +15,16 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
 
--- Insert default demo account if not exists
+-- Seed master admin account
 INSERT INTO users (id, email, name, hashed_password, role)
 VALUES (
-    '00000000-0000-0000-0000-000000000001',
-    'demo@tradly.ai',
-    'Demo Trader',
-    '$pbkdf2-sha256$29000$j5sK.H4b9q2xN8/0lZ3m7Q$XfR9gY2m6Wp0Vq7K8j1Z.Qe3L4u9P8s7D6a5C4b3A2',
-    'authenticated'
+    '9dca1422-efd3-4f9f-a96f-b9a34d6b4ccd',
+    'princepatel01258@gmail.com',
+    'Prince Patel',
+    '$pbkdf2-sha256$29000$S2kNQQjhvNd6b.3dm1MqZQ$fQqeEouO7.BVdqa3ebhB4rwlATku3Lv3lxATr2Akq4k',
+    'admin'
 )
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (email) DO UPDATE SET
+    hashed_password = EXCLUDED.hashed_password,
+    role = 'admin',
+    name = EXCLUDED.name;

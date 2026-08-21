@@ -8,14 +8,21 @@ client = TestClient(app)
 
 
 def test_auth_register_and_login_flow():
-    # 1. Register new user
+    # 1. Attempt register without invite code -> 403 Forbidden
     email = "trader_test_2026@tradly.ai"
     password = "SecurePassword2026!"
     name = "Test Trader"
 
-    res_reg = client.post(
+    res_reg_fail = client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": password, "name": name},
+    )
+    assert res_reg_fail.status_code == 403
+
+    # 2. Register with valid master invite code
+    res_reg = client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": password, "name": name, "invite_code": "TRADLY_PRINCE_2026"},
     )
     assert res_reg.status_code in [200, 409]
 
