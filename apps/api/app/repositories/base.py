@@ -14,8 +14,15 @@ async def init_db_pool() -> Optional[Any]:
         return None
     try:
         import asyncpg
+        dsn = settings.DATABASE_URL.split("?")[0]
+        is_ssl = (
+            "neon.tech" in settings.DATABASE_URL
+            or "sslmode=require" in settings.DATABASE_URL
+            or "aws" in settings.DATABASE_URL
+        )
         _db_pool = await asyncpg.create_pool(
-            dsn=settings.DATABASE_URL,
+            dsn=dsn,
+            ssl="require" if is_ssl else None,
             min_size=settings.DB_POOL_MIN_SIZE,
             max_size=settings.DB_POOL_MAX_SIZE,
         )
