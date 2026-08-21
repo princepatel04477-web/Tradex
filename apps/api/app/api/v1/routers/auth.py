@@ -11,13 +11,13 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=ApiResponse[TokenResponse])
 async def register(req: UserCreate) -> ApiResponse[TokenResponse]:
-    token = auth_service.register(req)
+    token = await auth_service.register(req)
     return ApiResponse.success(token)
 
 
 @router.post("/login", response_model=ApiResponse[TokenResponse])
 async def login(req: UserLogin) -> ApiResponse[TokenResponse]:
-    token = auth_service.login(req)
+    token = await auth_service.login(req)
     return ApiResponse.success(token)
 
 
@@ -25,5 +25,5 @@ async def login(req: UserLogin) -> ApiResponse[TokenResponse]:
 async def get_current_user_profile(
     user: CurrentUser = Depends(get_current_user),
 ) -> ApiResponse[UserProfile]:
-    profile = auth_service.get_profile(user.user_id)
+    profile = await auth_service.get_profile(user.user_id)
     return ApiResponse.success(profile)

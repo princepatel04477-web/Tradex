@@ -17,8 +17,22 @@ interface ApiResponseEnvelope<T> {
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   try {
-    const res = await fetch(url, options);
+    const token = typeof window !== "undefined" ? localStorage.getItem("tradly_token") : null;
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> || {}),
+    };
+    if (token && !headers["Authorization"]) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(url, {
+      ...options,
+      headers,
+    });
     if (!res.ok) {
+      if (res.status === 429) {
+        throw new Error("Rate limit exceeded. Please slow down and wait a few seconds.");
+      }
       throw new Error(`API error ${res.status}: ${res.statusText}`);
     }
     const json = await res.json();

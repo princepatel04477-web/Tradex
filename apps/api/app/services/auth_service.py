@@ -1,20 +1,22 @@
-"""Authentication service supporting JWT access token issuance and bcrypt password verification (FG-6, NFR-S1)."""
+"""Authentication service supporting JWT access token issuance and password verification (FG-6, NFR-S1)."""
 
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from app.core.errors import AuthenticationError, ConflictError
+from app.core.logging import logger
 from app.core.security import create_access_token, hash_password, verify_password
+from app.repositories.base import get_db_pool
 from app.schemas.auth import TokenResponse, UserCreate, UserLogin, UserProfile
 
 
 class AuthService:
     def __init__(self):
-        self.users: Dict[str, dict] = {}
-        # Seed demo user
-        demo_id = "user-demo-001"
-        self.users["demo@tradly.ai"] = {
+        self.in_memory_users: Dict[str, dict] = {}
+        # Seed demo user in-memory
+        demo_id = "00000000-0000-0000-0000-000000000001"
+        self.in_memory_users["demo@tradly.ai"] = {
             "id": demo_id,
             "email": "demo@tradly.ai",
             "name": "Demo Trader",
@@ -23,20 +25,71 @@ class AuthService:
             "created_at": datetime.now(timezone.utc),
         }
 
-    def register(self, req: UserCreate) -> TokenResponse:
+    async def register(self, req: UserCreate) -> TokenResponse:
         email = req.email.strip().lower()
-        if email in self.users:
+        pool = get_db_pool()
+
+        if pool:
+            try:
+                async with pool.acquire() as conn:
+                    existing = await conn.fetchrow(
+                        "SELECT id FROM users WHERE email = $1", email
+                    )
+                    if existing:
+                        raise ConflictError("A user with this email already exists")
+
+                    user_id = str(uuid.uuid4())
+                    hashed = hash_password(req.password)
+                    name = req.name or email.split("@")[0]
+                    now = datetime.now(timezone.utc)
+
+                    await conn.execute(
+                        """
+                        INSERT INTO users (id, email, name, hashed_password, role, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        uuid.UUID(user_id),
+                        email,
+                        name,
+                        hashed,
+                        "authenticated",
+                        now,
+                        now,
+                    )
+
+                    token = create_access_token(user_id=user_id, email=email)
+                    return TokenResponse(
+                        access_token=token,
+                        token_type="bearer",
+                        expires_in=3600,
+                        user=UserProfile(
+                            id=user_id,
+                            email=email,
+                            name=name,
+                            created_at=now,
+                        ),
+                    )
+            except ConflictError:
+                raise
+            except Exception as e:
+                logger.warning(f"Database user insert failed ({e}), falling back to in-memory store")
+
+        # Fallback to in-memory store
+        if email in self.in_memory_users:
             raise ConflictError("A user with this email already exists")
 
         user_id = str(uuid.uuid4())
         hashed = hash_password(req.password)
-        self.users[email] = {
+        now = datetime.now(timezone.utc)
+        name = req.name or email.split("@")[0]
+
+        self.in_memory_users[email] = {
             "id": user_id,
             "email": email,
-            "name": req.name or email.split("@")[0],
+            "name": name,
             "hashed_password": hashed,
             "role": "authenticated",
-            "created_at": datetime.now(timezone.utc),
+            "created_at": now,
         }
 
         token = create_access_token(user_id=user_id, email=email)
@@ -47,14 +100,46 @@ class AuthService:
             user=UserProfile(
                 id=user_id,
                 email=email,
-                name=self.users[email]["name"],
-                created_at=self.users[email]["created_at"],
+                name=name,
+                created_at=now,
             ),
         )
 
-    def login(self, req: UserLogin) -> TokenResponse:
+    async def login(self, req: UserLogin) -> TokenResponse:
         email = req.email.strip().lower()
-        user = self.users.get(email)
+        pool = get_db_pool()
+
+        if pool:
+            try:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT id, email, name, hashed_password, created_at FROM users WHERE email = $1",
+                        email,
+                    )
+                    if row:
+                        if not verify_password(req.password, row["hashed_password"]):
+                            raise AuthenticationError("Invalid email or password")
+
+                        user_id = str(row["id"])
+                        token = create_access_token(user_id=user_id, email=email)
+                        return TokenResponse(
+                            access_token=token,
+                            token_type="bearer",
+                            expires_in=3600,
+                            user=UserProfile(
+                                id=user_id,
+                                email=row["email"],
+                                name=row["name"],
+                                created_at=row["created_at"],
+                            ),
+                        )
+            except AuthenticationError:
+                raise
+            except Exception as e:
+                logger.warning(f"Database login query failed ({e}), falling back to in-memory store")
+
+        # Fallback to in-memory store
+        user = self.in_memory_users.get(email)
         if not user or not verify_password(req.password, user["hashed_password"]):
             raise AuthenticationError("Invalid email or password")
 
@@ -71,8 +156,26 @@ class AuthService:
             ),
         )
 
-    def get_profile(self, user_id: str) -> UserProfile:
-        for u in self.users.values():
+    async def get_profile(self, user_id: str) -> UserProfile:
+        pool = get_db_pool()
+        if pool:
+            try:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT id, email, name, created_at FROM users WHERE id = $1",
+                        uuid.UUID(user_id),
+                    )
+                    if row:
+                        return UserProfile(
+                            id=str(row["id"]),
+                            email=row["email"],
+                            name=row["name"],
+                            created_at=row["created_at"],
+                        )
+            except Exception as e:
+                logger.warning(f"Database get_profile query failed ({e})")
+
+        for u in self.in_memory_users.values():
             if u["id"] == user_id:
                 return UserProfile(
                     id=u["id"],

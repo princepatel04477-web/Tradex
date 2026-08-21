@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.envelope import ApiResponse
 from app.core.errors import TradlyException
 from app.core.logging import logger, set_correlation_id
+from app.core.rate_limit import RateLimitMiddleware
 from app.repositories.base import close_db_pool, init_db_pool, get_db_pool
 from app.services.alert_service import alert_service
 from app.services.market_service import market_service
@@ -43,7 +44,10 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
-# 1. CORS Middleware
+# 1. Rate Limiting Middleware
+app.add_middleware(RateLimitMiddleware)
+
+# 2. CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

@@ -11,6 +11,7 @@ MIGRATION_FILES = [
     "0001_initial_schema.sql",
     "0002_rls_policies.sql",
     "0003_seed_currency_pairs.sql",
+    "0004_users_and_auth.sql",
 ]
 
 
