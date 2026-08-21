@@ -12,6 +12,7 @@ from app.providers.base import MarketDataProvider, MarketTick
 from app.providers.fakes import FakeMarketDataProvider, BASE_PRICES
 from app.providers.yfinance_provider import YahooFinanceProvider
 from app.providers.finnhub import FinnhubProvider
+from app.providers.twelvedata import TwelveDataProvider
 from app.schemas.market import Candle, CurrencyPair, MarketSessionOverview, Tick
 
 PAIRS_METADATA = [
@@ -37,6 +38,8 @@ class MarketService:
     def __init__(self, provider: Optional[MarketDataProvider] = None):
         if provider:
             self.provider = provider
+        elif settings.MARKET_DATA_PROVIDER == "twelvedata":
+            self.provider = TwelveDataProvider()
         elif settings.MARKET_DATA_PROVIDER == "yahoo":
             self.provider = YahooFinanceProvider()
         elif settings.MARKET_DATA_PROVIDER == "finnhub":

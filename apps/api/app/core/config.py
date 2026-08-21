@@ -46,8 +46,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # Market Data Providers (yahoo, finnhub, oanda, fake)
-    MARKET_DATA_PROVIDER: str = "yahoo"
+    # Market Data Providers (twelvedata, yahoo, finnhub, oanda, fake)
+    MARKET_DATA_PROVIDER: str = "twelvedata"
+    TWELVEDATA_API_KEY: Optional[str] = None
     FINNHUB_API_KEY: Optional[str] = None
     OANDA_API_KEY: Optional[str] = None
     OANDA_ACCOUNT_ID: Optional[str] = None
