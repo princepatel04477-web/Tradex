@@ -77,17 +77,13 @@ function TradingViewWidget({
       allow_symbol_change: true,
       calendar: false,
       support_host: "https://www.tradingview.com",
-      backgroundColor: "rgba(11, 14, 20, 1)",
-      gridColor: "rgba(30, 38, 56, 0.5)",
+      backgroundColor: "rgba(6, 8, 13, 1)",
+      gridColor: "rgba(24, 34, 56, 0.4)",
       hide_side_toolbar: false,
       hide_top_toolbar: false,
       withdateranges: true,
       save_image: true,
-      studies: [
-        "STD;RSI",
-        "STD;MACD",
-        "STD;SMA"
-      ],
+      studies: ["STD;RSI", "STD;MACD", "STD;SMA"],
       show_popup_button: true,
       popup_width: "1000",
       popup_height: "650",
@@ -104,14 +100,10 @@ function TradingViewWidget({
 
   return (
     <div
-      className="tradingview-widget-container rounded-2xl overflow-hidden border border-tradly-border bg-tradly-card shadow-2xl"
+      className="tradingview-widget-container rounded-2xl overflow-hidden border border-tradly-border bg-[#06080D] shadow-2xl w-full h-[420px] sm:h-[520px] lg:h-[660px]"
       ref={containerRef}
-      style={{ height: height, width: "100%" }}
     >
-      <div
-        className="tradingview-widget-container__widget"
-        style={{ height: "100%", width: "100%" }}
-      />
+      <div className="tradingview-widget-container__widget w-full h-full" />
     </div>
   );
 }

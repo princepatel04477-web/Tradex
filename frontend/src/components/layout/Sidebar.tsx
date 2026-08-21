@@ -54,7 +54,7 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-64 bg-[#080C14] border-r border-tradly-border flex flex-col justify-between p-4 shrink-0 min-h-[calc(100vh-4rem)] select-none">
+    <aside className="hidden lg:flex w-64 bg-[#080C14] border-r border-tradly-border flex-col justify-between p-4 shrink-0 min-h-[calc(100vh-4rem)] select-none">
       <div className="space-y-6">
         {/* Navigation Core */}
         <div>
