@@ -24,22 +24,23 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  // Require explicit login on site load (session memory only)
   useEffect(() => {
-    const savedToken = typeof window !== "undefined" ? localStorage.getItem("tradly_token") : null;
-    const savedUser = typeof window !== "undefined" ? localStorage.getItem("tradly_user") : null;
+    // Check if session was active in this specific tab session
+    const savedToken = typeof window !== "undefined" ? sessionStorage.getItem("tradly_session_token") : null;
+    const savedUser = typeof window !== "undefined" ? sessionStorage.getItem("tradly_session_user") : null;
 
     if (savedToken && savedUser) {
       try {
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
       } catch (e) {
-        localStorage.removeItem("tradly_token");
-        localStorage.removeItem("tradly_user");
+        sessionStorage.removeItem("tradly_session_token");
+        sessionStorage.removeItem("tradly_session_user");
       }
     }
-    setIsLoading(false);
   }, []);
 
   const login = async (email: string, pass: string) => {
@@ -58,8 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(authData.access_token);
     setUser(authData.user);
     if (typeof window !== "undefined") {
-      localStorage.setItem("tradly_token", authData.access_token);
-      localStorage.setItem("tradly_user", JSON.stringify(authData.user));
+      sessionStorage.setItem("tradly_session_token", authData.access_token);
+      sessionStorage.setItem("tradly_session_user", JSON.stringify(authData.user));
     }
   };
 
@@ -84,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(authData.access_token);
     setUser(authData.user);
     if (typeof window !== "undefined") {
-      localStorage.setItem("tradly_token", authData.access_token);
-      localStorage.setItem("tradly_user", JSON.stringify(authData.user));
+      sessionStorage.setItem("tradly_session_token", authData.access_token);
+      sessionStorage.setItem("tradly_session_user", JSON.stringify(authData.user));
     }
   };
 
@@ -93,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     if (typeof window !== "undefined") {
+      sessionStorage.removeItem("tradly_session_token");
+      sessionStorage.removeItem("tradly_session_user");
       localStorage.removeItem("tradly_token");
       localStorage.removeItem("tradly_user");
     }
