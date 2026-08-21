@@ -2,10 +2,11 @@
 
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, Sliders, CheckSquare, Square, Zap, TrendingUp, AlertTriangle } from "lucide-react";
+import { Download, Sliders, CheckSquare, Square, Zap, Activity, Layers, AlertTriangle } from "lucide-react";
 import { api } from "../../services/api";
 import { Candle, IndicatorSnapshot, CompositeBias } from "../../types/market";
 import CandlestickChart from "../../components/chart/CandlestickChart";
+import TradingViewWidget from "../../components/chart/TradingViewWidget";
 
 function ChartContent() {
   const searchParams = useSearchParams();
@@ -13,6 +14,7 @@ function ChartContent() {
 
   const [symbol, setSymbol] = useState<string>(initialPair);
   const [timeframe, setTimeframe] = useState<string>("H1");
+  const [chartMode, setChartMode] = useState<"tradingview" | "quant">("tradingview");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [indicators, setIndicators] = useState<IndicatorSnapshot | null>(null);
   const [bias, setBias] = useState<CompositeBias | null>(null);
@@ -73,7 +75,7 @@ function ChartContent() {
             <select
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
-              className="p-2 rounded-xl bg-tradly-bg border border-tradly-border text-white text-sm font-bold font-mono focus:outline-none focus:border-cyan-400"
+              className="p-2 rounded-xl bg-tradly-bg border border-tradly-border text-white text-sm font-bold font-mono focus:outline-none focus:border-cyan-400 cursor-pointer"
             >
               {[
                 "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD",
@@ -103,13 +105,41 @@ function ChartContent() {
               ))}
             </div>
           </div>
+
+          <div>
+            <label className="text-[10px] text-tradly-muted font-bold uppercase block mb-1">Chart Engine</label>
+            <div className="flex items-center space-x-1 bg-tradly-bg p-1 rounded-xl border border-tradly-border text-xs font-mono">
+              <button
+                onClick={() => setChartMode("tradingview")}
+                className={`px-3 py-1 rounded-lg font-bold flex items-center space-x-1.5 transition-all ${
+                  chartMode === "tradingview"
+                    ? "bg-cyan-500 text-black shadow-sm"
+                    : "text-tradly-muted hover:text-white"
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>TradingView Pro</span>
+              </button>
+              <button
+                onClick={() => setChartMode("quant")}
+                className={`px-3 py-1 rounded-lg font-bold flex items-center space-x-1.5 transition-all ${
+                  chartMode === "quant"
+                    ? "bg-cyan-500 text-black shadow-sm"
+                    : "text-tradly-muted hover:text-white"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Quant Studio</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Export CSV & Bias Badge */}
         <div className="flex items-center space-x-3">
           {bias && (
             <div className="px-3 py-1.5 rounded-xl bg-tradly-bg border border-tradly-border text-xs flex items-center space-x-2">
-              <span className="text-tradly-muted font-medium">Bias:</span>
+              <span className="text-tradly-muted font-medium">Quant Bias:</span>
               <span className={`font-bold font-mono ${bias.score >= 0.2 ? "text-emerald-400" : bias.score <= -0.2 ? "text-red-400" : "text-amber-400"}`}>
                 {bias.bias} ({bias.score > 0 ? `+${bias.score}` : bias.score})
               </span>
@@ -118,7 +148,7 @@ function ChartContent() {
 
           <button
             onClick={handleExportCSV}
-            className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-xs font-bold transition-all"
+            className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer"
           >
             <Download className="w-4 h-4" />
             <span>Export CSV</span>
@@ -132,43 +162,55 @@ function ChartContent() {
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center space-x-2">
               <Zap className="w-4 h-4 text-cyan-400" />
-              <span>{symbol.replace("_", "/")} Candlestick Price & Volatility Chart ({timeframe})</span>
+              <span>
+                {symbol.replace("_", "/")} {chartMode === "tradingview" ? "TradingView Advanced Terminal" : "Quant Price Canvas"} ({timeframe})
+              </span>
             </h2>
-            <span className="text-xs text-tradly-muted font-mono">{candles.length} Candles Loaded</span>
+            <span className="text-xs text-tradly-muted font-mono">
+              {chartMode === "tradingview" ? "Institutional Real-Time Feed" : `${candles.length} Candles Loaded`}
+            </span>
           </div>
 
-          <CandlestickChart
-            candles={candles}
-            indicators={indicators}
-            showRSI={showRSI}
-            showMACD={showMACD}
-            showBB={showBB}
-            showEMA={showEMA}
-            showSMA200={showSMA200}
-          />
+          {chartMode === "tradingview" ? (
+            <TradingViewWidget
+              symbol={symbol}
+              interval={timeframe}
+              height={620}
+            />
+          ) : (
+            <CandlestickChart
+              candles={candles}
+              indicators={indicators}
+              showRSI={showRSI}
+              showMACD={showMACD}
+              showBB={showBB}
+              showEMA={showEMA}
+              showSMA200={showSMA200}
+            />
+          )}
         </div>
 
         {/* Right Sidebar: Indicator Controls & Snapshot */}
         <div className="lg:col-span-3 space-y-6">
-          {/* Indicator Overlays Toggle Panel (FR-1.6: up to 5 overlays) */}
+          {/* Indicator Overlays Toggle Panel (FR-1.6) */}
           <div className="p-5 rounded-2xl bg-tradly-card border border-tradly-border space-y-3">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
               <Sliders className="w-4 h-4 text-cyan-400" />
-              <span>Technical Overlays</span>
+              <span>Technical Indicators</span>
             </h3>
 
             <div className="space-y-2 text-xs">
               {[
-                { label: "RSI (14) Subchart", state: showRSI, setter: setShowRSI },
-                { label: "MACD (12,26,9) Subchart", state: showMACD, setter: setShowMACD },
+                { label: "RSI (14) Momentum", state: showRSI, setter: setShowRSI },
+                { label: "MACD (12,26,9) Trend", state: showMACD, setter: setShowMACD },
                 { label: "Bollinger Bands (20,2)", state: showBB, setter: setShowBB },
-                { label: "EMA 9 & 21", state: showEMA, setter: setShowEMA },
-                { label: "SMA 200 Baseline", state: showSMA200, setter: setShowSMA200 },
+                { label: "EMA 9 & 21 Ribbon", state: showEMA, setter: setShowEMA },
+                { label: "SMA 200 Institutional", state: showSMA200, setter: setShowSMA200 },
               ].map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => item.setter(!item.state)}
-                  className="w-full flex items-center justify-between p-2 rounded-xl bg-tradly-bg hover:bg-tradly-hover border border-tradly-border text-slate-300 transition-colors"
+                  className="w-full flex items-center justify-between p-2 rounded-xl bg-tradly-bg hover:bg-tradly-hover border border-tradly-border text-slate-300 transition-colors cursor-pointer"
                 >
                   <span>{item.label}</span>
                   {item.state ? <CheckSquare className="w-4 h-4 text-cyan-400" /> : <Square className="w-4 h-4 text-tradly-muted" />}
@@ -180,7 +222,7 @@ function ChartContent() {
           {/* Indicator Values Snapshot */}
           {indicators && (
             <div className="p-5 rounded-2xl bg-tradly-card border border-tradly-border space-y-3">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Indicator Values</h3>
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Quant Metrics Snapshot</h3>
               
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between">
@@ -202,6 +244,10 @@ function ChartContent() {
                 <div className="flex justify-between">
                   <span className="text-tradly-muted">EMA 9 / 21:</span>
                   <span className="text-cyan-400">{indicators.ema_9} / {indicators.ema_21}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-tradly-muted">BB Upper/Lower:</span>
+                  <span className="text-slate-300">{indicators.bb_upper} / {indicators.bb_lower}</span>
                 </div>
               </div>
 
@@ -234,7 +280,7 @@ function ChartContent() {
 
 export default function InteractiveChartPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-xs text-tradly-muted font-mono">Loading Chart View...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-xs text-tradly-muted font-mono">Loading TradingView Terminal...</div>}>
       <ChartContent />
     </Suspense>
   );
