@@ -4,7 +4,14 @@
 -- Requirements: NFR-S3, FR-6.4, TC-4
 -- =============================================================================
 
--- Enable Row Level Security on all user-scoped tables
+-- Enable Row Level Security (RLS) on all user-scoped tables (NFR-S3)
+-- Standard PostgreSQL / Neon auth schema emulation
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+    SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+$$ LANGUAGE sql STABLE;
+
+-- 1. PAPER ACCOUNTS
 ALTER TABLE paper_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
