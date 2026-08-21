@@ -36,8 +36,8 @@ export default function AuthModal() {
   };
 
   const fillDemoAccount = () => {
-    setEmail("demo@tradly.ai");
-    setPassword("TradlyDemo2026!");
+    setEmail("princepatel01258@gmail.com");
+    setPassword("Prince_1258");
     setTab("login");
     setError(null);
   };

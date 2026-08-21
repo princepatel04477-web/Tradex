@@ -2,13 +2,19 @@
 
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from jose import jwt, JWTError
 
 from app.core.config import settings
 from app.core.logging import logger
+
+# VIP / Admin accounts with unlimited API quotas
+UNLIMITED_EMAILS: Set[str] = {
+    "princepatel01258@gmail.com",
+}
 
 
 class SlidingWindowRateLimiter:
@@ -58,12 +64,34 @@ class SlidingWindowRateLimiter:
 limiter = SlidingWindowRateLimiter()
 
 
+def is_vip_request(request: Request) -> bool:
+    """Check if request belongs to an unlimited VIP / Admin account."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+        try:
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM],
+                options={"verify_exp": False},
+            )
+            email = payload.get("email", "").lower()
+            role = payload.get("role", "")
+            if email in UNLIMITED_EMAILS or role in ["admin", "vip"]:
+                return True
+        except JWTError:
+            pass
+
+    return False
+
+
 def get_client_identifier(request: Request) -> str:
     """Extract client IP address or authenticated user ID."""
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
-        return f"token:{token[-12:]}"
+        return f"token:{token[-16:]}"
 
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
@@ -93,6 +121,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Exempt docs, health check, and static files
         if path in ["/docs", "/openapi.json", "/health", "/redoc", "/"] or not path.startswith("/api/"):
             return await call_next(request)
+
+        # VIP / Admin account rate-limit bypass
+        if is_vip_request(request):
+            response: Response = await call_next(request)
+            response.headers["X-RateLimit-Limit"] = "unlimited"
+            response.headers["X-RateLimit-Remaining"] = "999999"
+            response.headers["X-RateLimit-Reset"] = "0"
+            return response
 
         client_key = get_client_identifier(request)
         max_requests = get_endpoint_limit(path)

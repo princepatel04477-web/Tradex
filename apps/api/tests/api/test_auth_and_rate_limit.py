@@ -54,3 +54,23 @@ def test_rate_limit_headers():
     assert "X-RateLimit-Limit" in res.headers
     assert "X-RateLimit-Remaining" in res.headers
     assert "X-RateLimit-Reset" in res.headers
+
+
+def test_vip_rate_limit_bypass():
+    res_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "princepatel01258@gmail.com", "password": "Prince_1258"},
+    )
+    assert res_login.status_code == 200
+    token = res_login.json()["data"]["access_token"]
+
+    # Make multiple requests with VIP token
+    for _ in range(5):
+        res = client.get(
+            "/api/v1/market/pairs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+        assert res.headers.get("X-RateLimit-Limit") == "unlimited"
+        assert res.headers.get("X-RateLimit-Remaining") == "999999"
+
