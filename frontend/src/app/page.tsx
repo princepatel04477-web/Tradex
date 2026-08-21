@@ -48,9 +48,9 @@ export default function CommandCenter() {
     let ws: WebSocket | null = null;
     try {
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
-        (typeof window !== "undefined" && window.location.hostname !== "localhost"
-          ? `wss://${window.location.hostname}/api/v1/ws/stream`
-          : "ws://localhost:8000/api/v1/ws/stream");
+        (typeof window !== "undefined" && window.location.hostname === "localhost"
+          ? "ws://localhost:8000/api/v1/ws/stream"
+          : "wss://tradex-api-q7re.onrender.com/api/v1/ws/stream");
       ws = new WebSocket(wsUrl);
       ws.onmessage = (event) => {
         try {

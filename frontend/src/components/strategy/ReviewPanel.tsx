@@ -73,39 +73,31 @@ export default function ReviewPanel({
           <p className="text-[11px] text-amber-300/90 leading-relaxed">
             {status.reason}
           </p>
-          {/* Only walk through keys when a key is what is missing. With one
-              already set the blocker is something else, and repeating the .env
-              instructions just buries the reason that actually applies. */}
-          {!status.api_key_present && (
-            <>
-              {/* With no provider pinned, the key you add is what decides the
-                  provider — so suggest a key you are likely to have rather
-                  than the env var of a default nobody chose. */}
-              <pre className="text-[10px] font-mono text-amber-200/80 bg-black/25 rounded-lg p-2 overflow-x-auto">
-                {status.provider_explicit
-                  ? `# repo root .env\n${status.api_key_env}=your-key-here`
-                  : "# repo root .env — one key is enough\nGROQ_API_KEY=your-key-here"}
-              </pre>
-              <p className="text-[10px] text-tradly-muted leading-relaxed">
-                {status.provider_explicit ? (
-                  <>
-                    TRADINGAGENTS_LLM_PROVIDER pins this to{" "}
-                    <strong>{status.provider}</strong>, so only{" "}
-                    {status.api_key_env} will do. Unset it to let any supported
-                    key choose the provider.
-                  </>
-                ) : (
-                  <>
-                    Groq, OpenAI, Anthropic, Google and the rest all work —
-                    whichever key is present picks the provider. Set
-                    TRADINGAGENTS_LLM_PROVIDER and TRADINGAGENTS_QUICK_THINK_LLM
-                    to override the choice or the model.
-                  </>
-                )}{" "}
-                Restart the API after editing .env.
-              </p>
-            </>
-          )}
+          {/* With no provider pinned, the key you add is what decides the
+              provider — so suggest a key you are likely to have rather than
+              the env var of a default nobody chose. */}
+          <pre className="text-[10px] font-mono text-amber-200/80 bg-black/25 rounded-lg p-2 overflow-x-auto">
+            {status.provider_explicit
+              ? `# repo root .env\n${status.api_key_env}=your-key-here`
+              : "# repo root .env — one key is enough\nGROQ_API_KEY=your-key-here"}
+          </pre>
+          <p className="text-[10px] text-tradly-muted leading-relaxed">
+            {status.provider_explicit ? (
+              <>
+                TRADINGAGENTS_LLM_PROVIDER pins this to{" "}
+                <strong>{status.provider}</strong>, so only {status.api_key_env}{" "}
+                will do. Unset it to let any supported key choose the provider.
+              </>
+            ) : (
+              <>
+                Groq, OpenAI, Anthropic, Google and the rest all work — whichever
+                key is present picks the provider. Set TRADINGAGENTS_LLM_PROVIDER
+                and TRADINGAGENTS_QUICK_THINK_LLM to override the choice or the
+                model.
+              </>
+            )}{" "}
+            Restart the API after editing .env.
+          </p>
           <button
             onClick={loadStatus}
             className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400 hover:underline"

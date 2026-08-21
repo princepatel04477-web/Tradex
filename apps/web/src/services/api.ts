@@ -4,7 +4,10 @@ import {
   PerformanceAnalytics, RAGQueryResponse, CurrencySentiment, EconomicEvent
 } from "../types/market";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api/v1";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 
+  (typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8000/api/v1"
+    : "https://tradex-api-q7re.onrender.com/api/v1");
 
 interface ApiResponseEnvelope<T> {
   data: T | null;
