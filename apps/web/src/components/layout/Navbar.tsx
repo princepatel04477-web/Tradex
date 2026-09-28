@@ -17,6 +17,9 @@ import {
   BookOpen,
   Compass,
   Radio,
+  FlaskConical,
+  BellRing,
+  BarChart3,
 } from "lucide-react";
 import gsap from "gsap";
 import { api } from "../../services/api";
@@ -28,6 +31,9 @@ const STRATEGY_ITEMS = [
   { name: "Risk & Position Sizer", href: "/strategy/risk", icon: Calculator },
   { name: "Trade Journal", href: "/strategy/journal", icon: BookOpen },
   { name: "Technical Playbook", href: "/strategy/reference", icon: Compass },
+  { name: "Backtest Lab", href: "/backtest", icon: FlaskConical },
+  { name: "Alerts", href: "/alerts", icon: BellRing },
+  { name: "Performance & Journal", href: "/analytics", icon: BarChart3 },
 ];
 
 export default function Navbar() {

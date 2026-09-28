@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.v1.routers import ai, alerts, analysis, auth, market, strategy, trading
+from app.api.v1.routers import agents, ai, alerts, analysis, auth, backtest, market, strategy, trading
 from app.core.config import settings
 from app.core.envelope import ApiResponse
 from app.core.errors import TradlyException
@@ -25,12 +25,29 @@ from app.services.market_service import market_service
 from app.services.trading_service import trading_service
 
 
+async def market_heartbeat(interval_seconds: float = 1.0) -> None:
+    """Single server-side tick loop: advances the feed, re-marks positions and evaluates alerts once per
+    tick, independent of how many WebSocket clients are connected (alerts fire with no browser open)."""
+    while True:
+        try:
+            market_service.update_ticks()
+            trading_service.update_positions_on_tick()
+            await alert_service.check_alerts_on_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"Market heartbeat iteration failed: {exc}")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} [{settings.APP_ENV}]")
     await init_db_pool()
+    heartbeat = asyncio.create_task(market_heartbeat())
     yield
     logger.info("Shutting down Tradly API...")
+    heartbeat.cancel()
     await close_db_pool()
 
 
@@ -144,6 +161,8 @@ app.include_router(ai.router, prefix=API_V1_PREFIX)
 app.include_router(alerts.router, prefix=API_V1_PREFIX)
 app.include_router(auth.router, prefix=API_V1_PREFIX)
 app.include_router(strategy.router, prefix=API_V1_PREFIX)
+app.include_router(backtest.router, prefix=API_V1_PREFIX)
+app.include_router(agents.router, prefix=API_V1_PREFIX)
 
 
 # 5. Root & Healthcheck Endpoints
@@ -162,21 +181,21 @@ async def health_check() -> ApiResponse[dict]:
 async def websocket_market_stream(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket client connected to live market stream")
+    last_seq = alert_service.event_seq
     try:
         while True:
-            # 1. Update ticks
-            ticks = market_service.update_ticks()
-            # 2. Update paper trading positions
-            trading_service.update_positions_on_tick()
-            # 3. Check price alerts
-            alert_events = await alert_service.check_alerts_on_tick()
+            # The heartbeat task owns state mutation; each client only reads a snapshot.
+            ticks = market_service.latest_ticks()
+            new_events = alert_service.events_since(last_seq)
+            if new_events:
+                last_seq = new_events[-1][0]
 
             payload = {
                 "type": "market_tick",
                 "ticks": {k: t.model_dump() for k, t in ticks.items()},
                 "sessions": market_service.get_market_sessions().model_dump(),
                 "account": trading_service.get_account().model_dump(),
-                "alert_events": [e.model_dump() for e in alert_events],
+                "alert_events": [e.model_dump() for _, e in new_events],
             }
             await websocket.send_text(json.dumps(payload, default=str))
             await asyncio.sleep(1.0)

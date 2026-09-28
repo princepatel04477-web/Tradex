@@ -15,6 +15,8 @@ import {
   Compass,
   Radio,
   Sparkles,
+  FlaskConical,
+  BellRing,
 } from "lucide-react";
 import { api } from "../../services/api";
 import { CurrencyPair } from "../../types/market";
@@ -26,6 +28,8 @@ const NAV_ITEMS = [
   { name: "AI Macro Assistant", href: "/ai-assistant", icon: Bot },
   { name: "Paper Trading", href: "/paper-trading", icon: DollarSign },
   { name: "Performance & Journal", href: "/analytics", icon: BarChart3 },
+  { name: "Backtest Lab", href: "/backtest", icon: FlaskConical, badge: "NEW" },
+  { name: "Alerts", href: "/alerts", icon: BellRing },
 ];
 
 const STRATEGY_ITEMS = [

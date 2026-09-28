@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 import uuid
 
 from app.core.config import settings
+from app.domain.ai_safety import is_recommendation_request
 from app.providers.base import LLMProvider, NewsProvider
 from app.providers.fakes import FakeLLMProvider, FakeNewsProvider
 from app.schemas.ai import (
@@ -83,6 +84,21 @@ class AIService:
         self.corpus = KNOWLEDGE_CORPUS
 
     async def query_rag(self, req: RAGQueryRequest) -> RAGQueryResponse:
+        if is_recommendation_request(req.query):
+            # AI-4.2: never produce entry prices, position sizes or buy/sell instructions.
+            return RAGQueryResponse(
+                query=req.query,
+                answer=(
+                    "Tradly does not give trade instructions, entry prices or position sizes. "
+                    "I can explain the macro drivers, central-bank policy and risk context for a pair instead — "
+                    "for example: 'What is driving EUR/USD this week?'"
+                ),
+                citations=[],
+                model_used="Tradly AI-4.2 guard",
+                relevance_score=0.0,
+                disclaimer=settings.AI_DISCLAIMER,
+                timestamp=datetime.now(timezone.utc),
+            )
         query_lower = req.query.lower()
         stop_words = {"what", "is", "the", "for", "and", "who", "won", "in", "of", "to", "a", "an", "on", "with", "at", "by", "from", "as", "how", "why", "where"}
         query_words = set(query_lower.split()) - stop_words

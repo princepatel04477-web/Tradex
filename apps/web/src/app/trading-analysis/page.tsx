@@ -18,6 +18,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import TradingViewWidget from "../../components/chart/TradingViewWidget";
+import AgentSquadPanel from "../../components/agents/AgentSquadPanel";
+import { AgentRun } from "../../types/agents";
 import { api } from "../../services/api";
 import { CurrencyPair, CurrencySentiment } from "../../types/market";
 import { useGsapStagger } from "../../hooks/useGsap";
@@ -31,14 +33,8 @@ function AnalysisWorkspaceContent() {
   const [pairs, setPairs] = useState<CurrencyPair[]>([]);
   const [sentiments, setSentiments] = useState<CurrencySentiment[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [agentOutput, setAgentOutput] = useState<{
-    bullishThesis: string;
-    bearishThesis: string;
-    riskVerdict: string;
-    synthesis: string;
-    confidence: number;
-    decision: "LONG" | "SHORT" | "NEUTRAL";
-  } | null>(null);
+  const [agentRun, setAgentRun] = useState<AgentRun | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
 
   const containerRef = useGsapStagger<HTMLDivElement>(".gsap-item", [symbol]);
 
@@ -51,8 +47,8 @@ function AnalysisWorkspaceContent() {
         ]);
         setPairs(pData);
         if (Array.isArray(sData)) setSentiments(sData);
-      } catch (err) {
-        console.warn("Failed to load pairs in workspace:", err);
+      } catch {
+        setPairs([]);
       }
     }
     loadInitial();
@@ -60,55 +56,13 @@ function AnalysisWorkspaceContent() {
 
   const handleRunAgentAnalysis = async () => {
     setIsAnalyzing(true);
+    setAgentError(null);
     try {
-      const formattedSymbol = symbol.replace("_", "/");
-      const [ragResponse] = await Promise.all([
-        api.queryRAG(
-          `Perform a comprehensive institutional multi-agent trade analysis on ${formattedSymbol}. Break down macroeconomic drivers, monetary policy divergence, support/resistance key levels, and risk parameters.`,
-          symbol
-        ),
-      ]);
-
-      const answer =
-        ragResponse?.answer ||
-        "Institutional macroeconomic alignment remains mixed with key central bank interest rate decisions driving volatility.";
-
-      const isBull =
-        answer.toLowerCase().includes("bullish") ||
-        answer.toLowerCase().includes("upside") ||
-        answer.toLowerCase().includes("long");
-      const isBear =
-        answer.toLowerCase().includes("bearish") ||
-        answer.toLowerCase().includes("downside") ||
-        answer.toLowerCase().includes("short");
-
-      const decision: "LONG" | "SHORT" | "NEUTRAL" =
-        isBull && !isBear ? "LONG" : isBear && !isBull ? "SHORT" : "NEUTRAL";
-      const confidence = decision === "NEUTRAL" ? 68 : 86;
-
-      setAgentOutput({
-        bullishThesis: `Yield spread differentials and recent economic data provide tailwinds for ${
-          symbol.split("_")[0]
-        } upside against key support levels.`,
-        bearishThesis: `Elevated positioning risk and potential central bank intervention cap near-term rally potential below major resistance.`,
-        riskVerdict: `Recommend max 1.5% portfolio risk per trade with ATR-based trailing stop and 1:2.4 minimum risk-to-reward ratio.`,
-        synthesis: answer,
-        confidence,
-        decision,
-      });
+      const run = await api.runAgentAnalysis(symbol, timeframe);
+      setAgentRun(run);
     } catch (err) {
-      console.error("Agent analysis error:", err);
-      setAgentOutput({
-        bullishThesis: "Support consolidation holding near 20-day moving average.",
-        bearishThesis: "Macro headwinds limit breakout velocity.",
-        riskVerdict: "Standard 1% risk per trade suggested.",
-        synthesis: `Analysis completed for ${symbol.replace(
-          "_",
-          "/"
-        )}. Monitor session liquidity overlap for breakout confirmation.`,
-        confidence: 75,
-        decision: "NEUTRAL",
-      });
+      setAgentRun(null);
+      setAgentError(err instanceof Error ? err.message : "Agent analysis failed");
     } finally {
       setIsAnalyzing(false);
     }
@@ -244,76 +198,8 @@ function AnalysisWorkspaceContent() {
 
         {/* AI Multi-Agent Squad & Confluence Panel (Right 4 Cols) */}
         <div className="xl:col-span-4 space-y-5">
-          {/* Agent Analysis Cards */}
-          <div className="gsap-item p-6 rounded-3xl bg-tradly-card border border-tradly-border shadow-card-depth space-y-4">
-            <div className="flex items-center justify-between border-b border-tradly-border pb-3">
-              <div className="flex items-center space-x-2">
-                <Bot className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-xs font-black text-white uppercase tracking-wider font-mono">
-                  AI Multi-Agent Squad
-                </h3>
-              </div>
-              {agentOutput && (
-                <span
-                  className={`text-[10px] font-black px-2.5 py-0.5 rounded-full font-mono ${
-                    agentOutput.decision === "LONG"
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-neon-emerald"
-                      : agentOutput.decision === "SHORT"
-                      ? "bg-red-500/20 text-red-400 border border-red-500/40 shadow-neon-red"
-                      : "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-                  }`}
-                >
-                  {agentOutput.decision} ({agentOutput.confidence}%)
-                </span>
-              )}
-            </div>
-
-            {/* Bullish Thesis Agent */}
-            <div className="p-4 rounded-2xl bg-[#080C14] border border-tradly-border space-y-2">
-              <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold font-mono">
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>Bullish Macro Researcher</span>
-              </div>
-              <p className="text-xs text-tradly-secondary leading-relaxed font-mono">
-                {agentOutput?.bullishThesis ||
-                  "Standing by. Click 'Deploy AI Analysis Squad' to evaluate interest rate differentials and macro momentum."}
-              </p>
-            </div>
-
-            {/* Bearish Risk Agent */}
-            <div className="p-4 rounded-2xl bg-[#080C14] border border-tradly-border space-y-2">
-              <div className="flex items-center space-x-2 text-red-400 text-xs font-bold font-mono">
-                <TrendingDown className="w-3.5 h-3.5" />
-                <span>Bearish Divergence Analyst</span>
-              </div>
-              <p className="text-xs text-tradly-secondary leading-relaxed font-mono">
-                {agentOutput?.bearishThesis ||
-                  "Standing by. Evaluating liquidity pools, overhead supply order blocks, and downside risks."}
-              </p>
-            </div>
-
-            {/* Risk Manager Agent */}
-            <div className="p-4 rounded-2xl bg-[#080C14] border border-tradly-border space-y-2">
-              <div className="flex items-center space-x-2 text-cyan-400 text-xs font-bold font-mono">
-                <Shield className="w-3.5 h-3.5" />
-                <span>Institutional Risk Manager</span>
-              </div>
-              <p className="text-xs text-tradly-secondary leading-relaxed font-mono">
-                {agentOutput?.riskVerdict ||
-                  "Calculating position limits, stop-loss invalidation levels, and ATR-based volatility buffers."}
-              </p>
-            </div>
-
-            {/* Full Synthesis if generated */}
-            {agentOutput?.synthesis && (
-              <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-500/40 space-y-2 shadow-neon-cyan">
-                <div className="text-xs font-bold text-cyan-400 flex items-center space-x-1.5 font-mono">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Groq LLaMA Macro Synthesis</span>
-                </div>
-                <p className="text-xs text-slate-200 leading-relaxed font-sans">{agentOutput.synthesis}</p>
-              </div>
-            )}
+          <div className="gsap-item">
+            <AgentSquadPanel run={agentRun} isRunning={isAnalyzing} error={agentError} />
           </div>
 
           {/* Currency Sentiment Matrix */}
@@ -324,21 +210,19 @@ function AnalysisWorkspaceContent() {
             </h3>
 
             <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
-              {[
-                { cur: "USD", score: "+0.45", bull: true },
-                { cur: "EUR", score: "+0.12", bull: true },
-                { cur: "GBP", score: "-0.18", bull: false },
-                { cur: "JPY", score: "-0.62", bull: false },
-                { cur: "AUD", score: "+0.28", bull: true },
-                { cur: "CHF", score: "-0.05", bull: false },
-              ].map((s) => (
+              {sentiments.map((s) => (
                 <div
-                  key={s.cur}
+                  key={s.currency}
                   className="p-2.5 rounded-xl bg-[#080C14] border border-tradly-border flex items-center justify-between"
                 >
-                  <span className="font-bold text-white">{s.cur}</span>
-                  <span className={`text-[11px] font-bold ${s.bull ? "text-emerald-400" : "text-red-400"}`}>
-                    {s.score}
+                  <span className="font-bold text-white">{s.currency}</span>
+                  <span
+                    className={`text-[11px] font-bold ${
+                      s.score > 0.2 ? "text-emerald-400" : s.score < -0.2 ? "text-red-400" : "text-amber-300"
+                    }`}
+                  >
+                    {s.score > 0.2 ? "▲" : s.score < -0.2 ? "▼" : "◆"} {s.score >= 0 ? "+" : ""}
+                    {s.score.toFixed(2)}
                   </span>
                 </div>
               ))}

@@ -1,6 +1,6 @@
 """Market Service: manages live tick streaming, OHLCV candles, and session clock (FG-1)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional
 import random
@@ -136,6 +136,19 @@ class MarketService:
             )
         return ticks
 
+    def latest_ticks(self) -> Dict[str, Tick]:
+        """Current bid/ask per pair without advancing the simulated feed (read-only snapshot)."""
+        return {
+            sym: Tick(
+                symbol=sym,
+                bid=float(d["bid"]),
+                ask=float(d["ask"]),
+                spread_pips=float(d["config"]["spread_pips"]),
+                timestamp=d["last_update"],
+            )
+            for sym, d in self.prices.items()
+        }
+
     def get_candles(self, symbol: str, timeframe: str = "H1", limit: int = 100) -> List[Candle]:
         sym = symbol.replace("/", "_")
         if sym not in self.candles_cache or timeframe not in self.candles_cache[sym]:
@@ -152,10 +165,15 @@ class MarketService:
 
         minutes_map = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
         step = minutes_map.get(timeframe, 60)
+        step_delta = timedelta(minutes=step)
+        # Align the latest bar to the timeframe boundary so open_time is strictly increasing.
+        epoch_min = int(now.timestamp() // 60)
+        last_open = datetime.fromtimestamp((epoch_min - epoch_min % step) * 60, tz=timezone.utc)
+        # Per-bar volatility scales with the square root of bar duration (H1 baseline ≈ 5–20 pips).
+        vol_scale = (step / 60) ** 0.5
 
         for i in range(count, 0, -1):
-            t = now - (count - i) * (now - (now - (now - now)))  # time step
-            vol = random.uniform(5, 20) * pip_sz
+            vol = random.uniform(5, 20) * pip_sz * vol_scale
             chg = random.uniform(-vol, vol)
             c_open = curr
             c_close = curr + chg
@@ -166,7 +184,7 @@ class MarketService:
                 Candle(
                     symbol=symbol,
                     timeframe=timeframe,
-                    open_time=now - (i * (now - (now - (now - now)))),
+                    open_time=last_open - (i - 1) * step_delta,
                     open=round(c_open, cfg["pip_decimals"] + 1),
                     high=round(c_high, cfg["pip_decimals"] + 1),
                     low=round(c_low, cfg["pip_decimals"] + 1),

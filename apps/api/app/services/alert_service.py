@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from app.core.errors import ResourceNotFoundError, ValidationError
 from app.providers.base import EmailProvider
@@ -17,6 +17,11 @@ class AlertService:
         self.email_provider = email_provider or FakeEmailProvider()
         self.alerts: Dict[str, Alert] = {}
         self.notifications: List[Notification] = []
+        # Last evaluated side per alert ("above" / "below") so alerts fire on crossing, not on state.
+        self._last_side: Dict[str, str] = {}
+        # Monotonic sequence of trigger events so every WebSocket client receives each event once.
+        self.event_seq = 0
+        self.recent_events: List[Tuple[int, AlertTriggerEvent]] = []
 
     def create_alert(self, user_id: str, req: AlertCreate) -> Alert:
         if len([a for a in self.alerts.values() if a.user_id == user_id]) >= 50:
@@ -37,6 +42,9 @@ class AlertService:
             last_triggered_at=None,
         )
         self.alerts[alert_id] = alert
+        pair = market_service.prices.get(alert.symbol)
+        if pair is not None:
+            self._last_side[alert_id] = "above" if float(pair["mid"]) >= alert.threshold_value else "below"
         return alert
 
     def list_alerts(self, user_id: str) -> List[Alert]:
@@ -45,6 +53,7 @@ class AlertService:
     def delete_alert(self, user_id: str, alert_id: str) -> bool:
         if alert_id in self.alerts and self.alerts[alert_id].user_id == user_id:
             del self.alerts[alert_id]
+            self._last_side.pop(alert_id, None)
             return True
         raise ResourceNotFoundError(f"Alert {alert_id} not found")
 
@@ -67,11 +76,15 @@ class AlertService:
 
             curr_price = float(pair["mid"])
             thresh = alert.threshold_value
+            side = "above" if curr_price >= thresh else "below"
+            prev_side = self._last_side.get(alert.id, side)
+            self._last_side[alert.id] = side
             is_hit = False
 
-            if alert.alert_type == "price_above" and curr_price >= thresh:
+            # Crossing semantics: fire only on the transition across the threshold.
+            if alert.alert_type == "price_above" and prev_side == "below" and side == "above":
                 is_hit = True
-            elif alert.alert_type == "price_below" and curr_price <= thresh:
+            elif alert.alert_type == "price_below" and prev_side == "above" and side == "below":
                 is_hit = True
 
             if is_hit:
@@ -84,6 +97,9 @@ class AlertService:
                     message=f"Alert: {alert.symbol} reached {curr_price} (Target: {thresh})",
                 )
                 triggered_events.append(event)
+                self.event_seq += 1
+                self.recent_events.append((self.event_seq, event))
+                self.recent_events = self.recent_events[-100:]
                 # create notification
                 self.notifications.append(
                     Notification(
@@ -100,7 +116,14 @@ class AlertService:
         return triggered_events
 
     def get_notifications(self, user_id: str) -> List[Notification]:
-        return [n for n in self.notifications if n.user_id == user_id]
+        return sorted(
+            (n for n in self.notifications if n.user_id == user_id),
+            key=lambda n: n.created_at,
+            reverse=True,
+        )
+
+    def events_since(self, seq: int) -> List[Tuple[int, AlertTriggerEvent]]:
+        return [(s, e) for s, e in self.recent_events if s > seq]
 
 
 alert_service = AlertService()

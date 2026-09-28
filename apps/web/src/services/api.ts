@@ -3,6 +3,9 @@ import {
   MarketSessionOverview, Position, AccountMetrics, ClosedTrade,
   PerformanceAnalytics, RAGQueryResponse, CurrencySentiment, EconomicEvent
 } from "../types/market";
+import { BacktestRequest, BacktestRun, BacktestRunSummary, StrategyInfo } from "../types/backtest";
+import { AgentRun } from "../types/agents";
+import { AlertCreate, AlertNotification, PriceAlert } from "../types/alerts";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 
   (typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -11,13 +14,16 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ||
 
 interface ApiResponseEnvelope<T> {
   data: T | null;
-  error: { code: string; message: string; details?: any } | null;
+  error: { code: string; message: string; details?: unknown } | null;
   meta: { request_id: string; timestamp: string; version: string };
 }
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   try {
-    const token = typeof window !== "undefined" ? localStorage.getItem("tradly_token") : null;
+    const token =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem("tradly_session_token") || localStorage.getItem("tradly_token")
+        : null;
     const headers: Record<string, string> = {
       ...(options?.headers as Record<string, string> || {}),
     };
@@ -33,7 +39,17 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
       if (res.status === 429) {
         throw new Error("Rate limit exceeded. Please slow down and wait a few seconds.");
       }
-      throw new Error(`API error ${res.status}: ${res.statusText}`);
+      let message = `API error ${res.status}: ${res.statusText}`;
+      try {
+        const errBody: unknown = await res.json();
+        if (errBody && typeof errBody === "object" && "error" in errBody) {
+          const envErr = (errBody as { error: { message?: string } | null }).error;
+          if (envErr?.message) message = envErr.message;
+        }
+      } catch {
+        // Response body was not JSON; keep the status-based message.
+      }
+      throw new Error(message);
     }
     const json = await res.json();
     // Unwrap { data, error, meta } envelope if present
@@ -97,4 +113,37 @@ export const api = {
     }),
   getSentiments: () => fetchJSON<{ currencies: CurrencySentiment[] }>(`${API_BASE}/ai/sentiment`).then(r => r.currencies || r),
   getCalendar: () => fetchJSON<EconomicEvent[]>(`${API_BASE}/ai/calendar`),
+
+  // Backtesting (Month 3)
+  getBacktestStrategies: () => fetchJSON<StrategyInfo[]>(`${API_BASE}/backtest/strategies`),
+  runBacktest: (req: BacktestRequest) =>
+    fetchJSON<BacktestRun>(`${API_BASE}/backtest/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }),
+  getBacktestRuns: () => fetchJSON<BacktestRunSummary[]>(`${API_BASE}/backtest/runs`),
+  getBacktestRun: (runId: string) => fetchJSON<BacktestRun>(`${API_BASE}/backtest/runs/${runId}`),
+
+  // Multi-agent analysis (Month 4)
+  runAgentAnalysis: (symbol: string, timeframe: string, useLlm = true) =>
+    fetchJSON<AgentRun>(`${API_BASE}/agents/analyse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, timeframe, use_llm: useLlm }),
+    }),
+
+  // Alerts (FG-6)
+  getAlerts: () => fetchJSON<PriceAlert[]>(`${API_BASE}/alerts`),
+  createAlert: (req: AlertCreate) =>
+    fetchJSON<PriceAlert>(`${API_BASE}/alerts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }),
+  toggleAlert: (alertId: string) =>
+    fetchJSON<PriceAlert>(`${API_BASE}/alerts/${alertId}/toggle`, { method: "POST" }),
+  deleteAlert: (alertId: string) =>
+    fetchJSON<boolean>(`${API_BASE}/alerts/${alertId}`, { method: "DELETE" }),
+  getNotifications: () => fetchJSON<AlertNotification[]>(`${API_BASE}/alerts/notifications`),
 };

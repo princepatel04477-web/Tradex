@@ -83,3 +83,31 @@ def test_validation_error_envelope_formatting():
     assert body["data"] is None
     assert body["error"]["code"] == "VALIDATION_ERROR"
     assert "meta" in body
+
+
+def test_backtest_endpoints():
+    res = client.get("/api/v1/backtest/strategies")
+    assert res.status_code == 200
+    assert len(res.json()["data"]) == 3
+
+    res = client.post("/api/v1/backtest/run", json={"symbol": "EUR_USD", "timeframe": "H4", "bars": 500})
+    assert res.status_code == 200
+    run = res.json()["data"]
+    assert run["metrics"]["bars_tested"] == 500
+    assert isinstance(run["trades"], list)
+
+    res = client.get(f"/api/v1/backtest/runs/{run['run_id']}")
+    assert res.status_code == 200
+    assert client.get("/api/v1/backtest/runs").json()["data"][0]["run_id"] == run["run_id"]
+
+    res = client.post("/api/v1/backtest/run", json={"symbol": "EUR_USD", "bars": 10})
+    assert res.status_code == 422
+
+
+def test_agents_endpoint():
+    res = client.post("/api/v1/agents/analyse", json={"symbol": "USD_JPY", "timeframe": "H1", "use_llm": False})
+    assert res.status_code == 200
+    body = res.json()["data"]
+    assert [a["agent"] for a in body["agents"]] == ["technical", "macro", "risk", "synthesis"]
+    assert body["verdict"]["label"]
+    assert client.get("/api/v1/agents/runs").status_code == 200
