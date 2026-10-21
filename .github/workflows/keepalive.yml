@@ -1,0 +1,15 @@
+name: Keep API warm
+
+# Render's free tier sleeps after 15 idle minutes; ping the API during the IST working day
+# (03:00-07:59 UTC = 08:30-13:29 IST) so demos never hit a cold start.
+on:
+  schedule:
+    - cron: "*/10 3-7 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -fsS --max-time 90 https://tradex-api-q7re.onrender.com/health || true
