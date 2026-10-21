@@ -1,13 +1,16 @@
 """AI Service: grounded RAG intelligence, sentiment analysis, economic calendar (FG-3, AI-1, AI-2, AI-4)."""
 
+import asyncio
+import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-import uuid
 
 from app.core.config import settings
-from app.domain.ai_safety import is_recommendation_request
+from app.core.logging import logger
+from app.domain.ai_safety import contains_trade_instruction, is_recommendation_request
 from app.providers.base import LLMProvider, NewsProvider
-from app.providers.fakes import FakeLLMProvider, FakeNewsProvider
+from app.providers.live_news import CURRENCY_KEYWORDS, live_news, tag_currencies
 from app.schemas.ai import (
     CitationSource,
     CurrencySentiment,
@@ -22,7 +25,7 @@ from app.schemas.ai import (
 KNOWLEDGE_CORPUS = [
     {
         "id": "doc-001",
-        "title": "Federal Reserve Monetary Policy Report (July 2026)",
+        "title": "Federal Reserve Monetary Policy Report (background)",
         "source": "Federal Reserve System",
         "url": "https://www.federalreserve.gov/monetarypolicy/mpr_default.htm",
         "currencies": ["USD"],
@@ -36,7 +39,7 @@ KNOWLEDGE_CORPUS = [
     },
     {
         "id": "doc-002",
-        "title": "ECB Economic Bulletin - Issue 4, 2026",
+        "title": "ECB Economic Bulletin (background)",
         "source": "European Central Bank",
         "url": "https://www.ecb.europa.eu/pub/economic-bulletin/html/index.en.html",
         "currencies": ["EUR"],
@@ -49,7 +52,7 @@ KNOWLEDGE_CORPUS = [
     },
     {
         "id": "doc-003",
-        "title": "Bank of Japan Monetary Policy Statement (July 2026)",
+        "title": "Bank of Japan Monetary Policy Statement (background)",
         "source": "Bank of Japan",
         "url": "https://www.boj.or.jp/en/mopo/index.htm",
         "currencies": ["JPY"],
@@ -63,7 +66,7 @@ KNOWLEDGE_CORPUS = [
     },
     {
         "id": "doc-004",
-        "title": "Bank of England Monetary Policy Summary",
+        "title": "Bank of England Monetary Policy Summary (background)",
         "source": "Bank of England",
         "url": "https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes",
         "currencies": ["GBP"],
@@ -77,12 +80,65 @@ KNOWLEDGE_CORPUS = [
 ]
 
 
+BULLISH_WORDS = {
+    "rise", "rises", "rising", "rose", "gain", "gains", "gained", "surge", "surges", "surged", "rally", "rallies",
+    "rallied", "strong", "stronger", "strength", "strengthens", "hawkish", "higher", "jump", "jumps", "jumped",
+    "climb", "climbs", "climbed", "beat", "beats", "firm", "firmer", "firms", "boost", "boosted", "advance",
+    "advances", "rebound", "rebounds", "upbeat", "robust", "hike", "hikes", "accelerate", "recovers", "recovery", "bid",
+}
+BEARISH_WORDS = {
+    "fall", "falls", "falling", "fell", "drop", "drops", "dropped", "slide", "slides", "slid", "weak", "weaker",
+    "weakness", "weakens", "dovish", "lower", "plunge", "plunges", "plunged", "slump", "slumps", "decline",
+    "declines", "declined", "miss", "misses", "missed", "losses", "loses", "lost", "retreat", "retreats", "sinks",
+    "sank", "tumble", "tumbles", "slows", "slowdown", "contraction", "cut", "cuts", "pressure", "offered", "selloff",
+}
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _headline_score(text: str) -> float:
+    words = _WORD_RE.findall(text.lower())
+    pos = sum(1 for w in words if w in BULLISH_WORDS)
+    neg = sum(1 for w in words if w in BEARISH_WORDS)
+    return 0.0 if pos + neg == 0 else (pos - neg) / (pos + neg)
+
+
+def _label(score: float) -> str:
+    return "Bullish" if score > 0.15 else "Bearish" if score < -0.15 else "Neutral"
+
+
+COUNTRY_NAMES = {
+    "USD": "United States", "EUR": "Eurozone", "JPY": "Japan", "GBP": "United Kingdom", "AUD": "Australia",
+    "CAD": "Canada", "CHF": "Switzerland", "NZD": "New Zealand", "CNY": "China", "All": "Global",
+}
+
+
 class AIService:
-    def __init__(self, llm_provider: Optional[LLMProvider] = None, news_provider: Optional[NewsProvider] = None):
-        self.llm_provider = llm_provider or FakeLLMProvider()
-        self.news_provider = news_provider or FakeNewsProvider()
+    def __init__(self, llm_provider: Optional[LLMProvider] = None, news_provider: Optional[NewsProvider] = None, live: Optional[bool] = None):
+        self.llm_provider = llm_provider
+        self.news_provider = news_provider
+        self.live = settings.LIVE_MARKET_DATA if live is None else live
         self.corpus = KNOWLEDGE_CORPUS
 
+    # ------------------------------------------------------------------ news
+    def get_headlines(self) -> List[dict]:
+        return live_news.headlines() if self.live else []
+
+    def _news_documents(self) -> List[dict]:
+        return [
+            {
+                "id": h["id"],
+                "title": h["title"],
+                "source": h["source"],
+                "url": h.get("url"),
+                "currencies": h["currencies"],
+                "content": f"{h['title']}. {h['summary']}",
+                "published_at": h["published_at"],
+                "live": True,
+            }
+            for h in self.get_headlines()
+        ]
+
+    # ------------------------------------------------------------------- RAG
     async def query_rag(self, req: RAGQueryRequest) -> RAGQueryResponse:
         if is_recommendation_request(req.query):
             # AI-4.2: never produce entry prices, position sizes or buy/sell instructions.
@@ -100,22 +156,32 @@ class AIService:
                 timestamp=datetime.now(timezone.utc),
             )
         query_lower = req.query.lower()
-        stop_words = {"what", "is", "the", "for", "and", "who", "won", "in", "of", "to", "a", "an", "on", "with", "at", "by", "from", "as", "how", "why", "where"}
-        query_words = set(query_lower.split()) - stop_words
+        stop_words = {
+            "what", "is", "the", "for", "and", "who", "won", "in", "of", "to", "a", "an", "on", "with", "at", "by",
+            "from", "as", "how", "why", "where", "this", "that", "are", "be", "will", "it", "about", "me", "tell",
+            "week", "today", "now", "latest", "s", "do", "does",
+        }
+        query_words = set(_WORD_RE.findall(query_lower)) - stop_words
+        sym_ccys: List[str] = []
+        sym = (req.symbol or req.currency_pair or "").replace("/", "_").upper()
+        if sym:
+            sym_ccys = sym.split("_") if "_" in sym else [sym[:3], sym[3:]]
+        query_ccys = set(tag_currencies(req.query))
+        pair_ccys = query_ccys | set(sym_ccys)
+
         matched_chunks = []
-        for doc in self.corpus:
-            score = 0.0
-            doc_words = set(doc["content"].lower().split() + doc["title"].lower().split()) - stop_words
+        news_docs = await asyncio.to_thread(self._news_documents) if self.live else []
+        for doc in self.corpus + news_docs:
+            doc_words = set(_WORD_RE.findall(doc["content"].lower() + " " + doc["title"].lower())) - stop_words
             intersection = query_words.intersection(doc_words)
-            if intersection and query_words:
-                score = len(intersection) / len(query_words)
-
-            if req.symbol:
-                sym_clean = req.symbol.replace("/", "_")
-                base, quote = sym_clean.split("_") if "_" in sym_clean else (sym_clean[:3], sym_clean[3:])
-                if base in doc["currencies"] or quote in doc["currencies"]:
-                    score += 0.35
-
+            score = len(intersection) / len(query_words) if query_words else 0.0
+            # Live headlines must either share 2+ query terms or cover a currency the question names.
+            if doc.get("live") and len(intersection) < 2 and not (query_ccys & set(doc["currencies"])):
+                continue
+            if pair_ccys & set(doc["currencies"]):
+                score += 0.35
+            if doc.get("live"):
+                score += 0.05  # prefer fresh news over background documents at equal relevance
             if score > 0.15:
                 matched_chunks.append((score, doc))
 
@@ -136,109 +202,133 @@ class AIService:
                 timestamp=datetime.now(timezone.utc),
             )
 
-        top_score, top_doc = matched_chunks[0]
+        top = matched_chunks[:6]
+        top_score, top_doc = top[0]
         citations = [
             CitationSource(
                 id=doc["id"],
                 title=doc["title"],
                 source=doc["source"],
                 url=doc.get("url"),
-                snippet=doc["content"][:220] + "...",
-                published_at=datetime.now(timezone.utc).isoformat(),
+                snippet=doc["content"][:220] + ("..." if len(doc["content"]) > 220 else ""),
+                published_at=doc.get("published_at") or "Reference document",
             )
-            for _, doc in matched_chunks[:3]
+            for _, doc in top[:4]
         ]
 
         answer = (
-            f"Based on official macroeconomic filings from {top_doc['source']}: {top_doc['content'][:350]}... "
-            f"[Source: {top_doc['title']}]."
+            f"Based on {top_doc['source']}: {top_doc['content'][:350]}"
+            f"{'...' if len(top_doc['content']) > 350 else ''} [Source: {top_doc['title']}]."
         )
+        model_used = "Tradly-Grounded-RAG (retrieval only)"
+
+        if self.live and settings.GROQ_API_KEY:
+            context = "\n\n".join(
+                f"[{i + 1}] {doc['title']} ({doc['source']}, {doc.get('published_at') or 'background reference'}): {doc['content'][:700]}"
+                for i, (_, doc) in enumerate(top)
+            )
+            system = (
+                "You are Tradly's macro research assistant for Forex. Answer ONLY from the numbered sources provided. "
+                "Cite sources inline like [1]. If the sources do not answer the question, say so. Be concise (max 170 words). "
+                "Never give trade instructions, entry prices, stop levels, lot or position sizes, or tell the user to buy or sell."
+            )
+            user = f"Question: {req.query}\nPair context: {sym or 'none'}\nToday (UTC): {datetime.now(timezone.utc):%Y-%m-%d}\n\nSources:\n{context}"
+            try:
+                from app.providers.groq import GroqProvider
+
+                text = await asyncio.wait_for(GroqProvider().generate(system, user, temperature=0.2, max_tokens=600), timeout=14.0)
+                text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+                if text and not contains_trade_instruction(text):
+                    answer = text
+                    model_used = f"Groq {settings.GROQ_MODEL} + grounded retrieval ({len(top)} sources)"
+            except Exception as exc:
+                logger.warning(f"Groq RAG synthesis failed, using retrieval answer: {exc}")
 
         return RAGQueryResponse(
             query=req.query,
             answer=answer,
             citations=citations,
-            model_used="Tradly-Grounded-RAG (Llama-3-70B)",
-            relevance_score=min(1.0, round(top_score + 0.65, 2)),
+            model_used=model_used,
+            relevance_score=min(1.0, round(top_score + 0.5, 2)),
             disclaimer=settings.AI_DISCLAIMER,
             timestamp=datetime.now(timezone.utc),
         )
 
+    # ------------------------------------------------------------- sentiment
     def get_sentiment_overview(self) -> SentimentOverview:
-        currencies = [
-            CurrencySentiment(currency="USD", score=0.65, label="Bullish", article_count=42, sample_headline="Fed signals patience as inflation progress moderates", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="EUR", score=-0.35, label="Bearish", article_count=38, sample_headline="ECB policy easing on track as manufacturing slows", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="JPY", score=0.45, label="Bullish", article_count=29, sample_headline="BoJ rate hike expectations firm up following wage growth", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="GBP", score=0.10, label="Neutral", article_count=31, sample_headline="BoE balances rate cuts against persistent service sector inflation", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="AUD", score=0.25, label="Bullish", article_count=18, sample_headline="RBA retains hawkish bias as core inflation holds above target band", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="CAD", score=-0.20, label="Bearish", article_count=14, sample_headline="Bank of Canada monetary easing supports domestic housing recovery", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="CHF", score=-0.15, label="Neutral", article_count=12, sample_headline="SNB monitors Swiss Franc strength in ongoing intervention framework", timestamp=datetime.now(timezone.utc)),
-            CurrencySentiment(currency="NZD", score=-0.30, label="Bearish", article_count=10, sample_headline="RBNZ brings forward rate cut trajectory amid growth headwinds", timestamp=datetime.now(timezone.utc)),
-        ]
+        """Per-currency headline sentiment from live FX news (lexicon scoring of FXStreet + Finnhub headlines)."""
+        headlines = self.get_headlines()
+        now = datetime.now(timezone.utc)
+        currencies: List[CurrencySentiment] = []
+        for ccy in CURRENCY_KEYWORDS:
+            related = [h for h in headlines if ccy in h["currencies"]]
+            scored = [(_headline_score(f"{h['title']} {h['summary']}"), h) for h in related]
+            score = round(sum(s for s, _ in scored) / len(scored), 2) if scored else 0.0
+            sample = max(scored, key=lambda x: abs(x[0]))[1]["title"] if scored else None
+            currencies.append(
+                CurrencySentiment(
+                    currency=ccy,
+                    score=score,
+                    label=_label(score),
+                    article_count=len(related),
+                    sample_headline=sample,
+                    timestamp=now,
+                )
+            )
+        ranked = sorted((c for c in currencies if c.article_count), key=lambda c: c.score, reverse=True)
+        if len(ranked) >= 2 and ranked[0].score - ranked[-1].score > 0.2:
+            bias = f"{ranked[0].currency} strongest / {ranked[-1].currency} weakest in headlines"
+        else:
+            bias = "Mixed / Neutral"
         return SentimentOverview(
             currencies=currencies,
-            overall_market_bias="USD-Dominant Risk-Managed",
-            total_articles_analyzed=194,
-            model_version="ProsusAI/finbert-forex-v1",
-            last_updated=datetime.now(timezone.utc),
+            overall_market_bias=bias if headlines else "No live headlines available",
+            total_articles_analyzed=len(headlines),
+            model_version="Lexicon sentiment on live FXStreet + Finnhub headlines",
+            last_updated=now,
         )
 
+    # -------------------------------------------------------------- calendar
     def get_economic_calendar(self) -> List[EconomicCalendarEvent]:
+        """This week's real economic calendar (ForexFactory), High/Medium impact, upcoming first."""
+        rows = live_news.calendar() if self.live else []
         now = datetime.now(timezone.utc)
-        return [
-            EconomicCalendarEvent(
-                id="event-001",
-                title="US Non-Farm Payrolls (NFP)",
-                country="United States",
-                currency="USD",
-                scheduled_at=now,
-                impact="High",
-                previous="206K",
-                consensus="175K",
-                actual="185K",
-                ai_briefing="NFP prints historically drive 40–80 pip immediate volatility on EUR/USD and USD/JPY.",
-                historical_pip_volatility="65 pips avg across 15-min post-release window",
-            ),
-            EconomicCalendarEvent(
-                id="event-002",
-                title="US Consumer Price Index (CPI YoY)",
-                country="United States",
-                currency="USD",
-                scheduled_at=now,
-                impact="High",
-                previous="3.0%",
-                consensus="2.9%",
-                actual=None,
-                ai_briefing="A core CPI beat (>3.2%) strengthens USD across G10 majors.",
-                historical_pip_volatility="75 pips avg on EUR/USD within 30 minutes",
-            ),
-            EconomicCalendarEvent(
-                id="event-003",
-                title="ECB Main Refinancing Rate Decision",
-                country="Eurozone",
-                currency="EUR",
-                scheduled_at=now,
-                impact="High",
-                previous="4.25%",
-                consensus="4.00%",
-                actual=None,
-                ai_briefing="25bps cut anticipated; forward guidance press conference key for EUR/USD trajectory.",
-                historical_pip_volatility="50 pips on EUR/USD and EUR/GBP",
-            ),
-            EconomicCalendarEvent(
-                id="event-004",
-                title="Bank of Japan Policy Rate Decision",
-                country="Japan",
-                currency="JPY",
-                scheduled_at=now,
-                impact="High",
-                previous="0.10%",
-                consensus="0.25%",
-                actual="0.25%",
-                ai_briefing="BoJ rate hike triggers immediate short-covering across USD/JPY and EUR/JPY.",
-                historical_pip_volatility="110 pips avg on USD/JPY across Asian session",
-            ),
-        ]
+        events: List[EconomicCalendarEvent] = []
+        for row in rows:
+            impact = row.get("impact", "")
+            if impact not in ("High", "Medium"):
+                continue
+            try:
+                when = datetime.fromisoformat(row["date"]).astimezone(timezone.utc)
+            except Exception:
+                continue
+            ccy = row.get("country", "")
+            title = row.get("title", "")
+            upcoming = when >= now
+            briefing = (
+                f"{'Scheduled' if upcoming else 'Released'} {impact.lower()}-impact {ccy} data. "
+                f"{ccy} pairs typically see wider spreads and faster moves around the release; "
+                "compare the actual print against the forecast to gauge the surprise."
+            )
+            events.append(
+                EconomicCalendarEvent(
+                    id="ff-" + hashlib.md5(f"{title}|{row['date']}|{ccy}".encode()).hexdigest()[:10],
+                    title=title,
+                    country=COUNTRY_NAMES.get(ccy, ccy),
+                    currency=ccy,
+                    scheduled_at=when,
+                    impact=impact,
+                    previous=row.get("previous") or None,
+                    consensus=row.get("forecast") or None,
+                    actual=row.get("actual") or None,
+                    ai_briefing=briefing,
+                    historical_pip_volatility=None,
+                )
+            )
+        # Upcoming events first (soonest first), then the most recent past releases.
+        upcoming = sorted((e for e in events if e.scheduled_at >= now), key=lambda e: e.scheduled_at)
+        past = sorted((e for e in events if e.scheduled_at < now), key=lambda e: e.scheduled_at, reverse=True)
+        return upcoming + past
 
 
 ai_service = AIService()

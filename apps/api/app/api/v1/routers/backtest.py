@@ -16,7 +16,7 @@ async def list_strategies() -> ApiResponse[List[StrategyInfo]]:
 
 
 @router.post("/run", response_model=ApiResponse[BacktestRunOut])
-async def run_backtest(
+def run_backtest(
     req: BacktestRequest,
     user: Optional[CurrentUser] = Depends(get_optional_user),
 ) -> ApiResponse[BacktestRunOut]:

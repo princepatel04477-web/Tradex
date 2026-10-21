@@ -6,11 +6,11 @@ import time
 import uuid
 from collections import OrderedDict
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from app.core.errors import ResourceNotFoundError, ValidationError
-from app.domain.backtest import SUPPORTED_STRATEGIES, StrategyConfig, run_backtest
-from app.domain.pips import normalize_symbol, split_symbol
+from app.domain.backtest import SUPPORTED_STRATEGIES, Bar, StrategyConfig, run_backtest
+from app.domain.pips import get_pip_decimal_places, normalize_symbol, split_symbol
 from app.providers.historical import generate_history
 from app.schemas.backtest import (
     BacktestMetrics,
@@ -21,7 +21,7 @@ from app.schemas.backtest import (
     EquityPointOut,
     StrategyInfo,
 )
-from app.services.market_service import PAIRS_METADATA
+from app.services.market_service import PAIRS_METADATA, market_service
 
 MAX_STORED_RUNS = 50
 MAX_CURVE_POINTS = 400
@@ -40,16 +40,34 @@ STRATEGY_TITLES: Dict[str, str] = {
 
 
 def _usd_rates() -> Dict[str, Decimal]:
-    """Static quote->USD conversion rates derived from the pair registry reference prices."""
+    """Quote->USD conversion rates from the current market mids."""
     rates: Dict[str, Decimal] = {"USD": Decimal("1")}
     for cfg in PAIRS_METADATA:
         base, quote = cfg["base"], cfg["quote"]
-        price: Decimal = cfg["base_price"]
+        price: Decimal = market_service.prices[cfg["symbol"]]["mid"]
         if quote == "USD":
             rates[base] = price
         elif base == "USD":
             rates[quote] = Decimal("1") / price
     return rates
+
+
+def _load_bars(symbol: str, timeframe: str, count: int, base_price: Decimal) -> Tuple[List[Bar], str]:
+    """Most recent ``count`` closed bars of real market history (offline generator only when live data is off)."""
+    if not market_service.live:
+        return generate_history(symbol, timeframe, count, base_price), "Offline generated dataset (live data disabled)"
+    raw = market_service.get_history_bars(symbol, timeframe)
+    closed = raw[:-1]  # the last bar is still forming
+    decimals = get_pip_decimal_places(symbol) + 1
+    quant = Decimal(1).scaleb(-decimals)
+
+    def q(x: float) -> Decimal:
+        return Decimal(repr(x)).quantize(quant)
+
+    bars = [Bar(time=b.time.isoformat(), open=q(b.open), high=q(b.high), low=q(b.low), close=q(b.close)) for b in closed[-count:]]
+    if len(bars) < 200:
+        raise ValidationError(f"Only {len(bars)} real {timeframe} bars are available for {symbol}; need at least 200")
+    return bars, "Real market history - Yahoo Finance FX (mid prices)"
 
 
 class BacktestService:
@@ -89,7 +107,7 @@ class BacktestService:
         )
 
         started = time.perf_counter()
-        bars = generate_history(symbol, req.timeframe, req.bars, cfg_row["base_price"])
+        bars, data_source = _load_bars(symbol, req.timeframe, req.bars, cfg_row["base_price"])
         try:
             result = run_backtest(
                 symbol=symbol,
@@ -115,7 +133,7 @@ class BacktestService:
             period_start=bars[0].time,
             period_end=bars[-1].time,
             spread_pips=float(cfg_row["spread_pips"]),
-            data_source="Tradly deterministic historical dataset (seeded, reproducible)",
+            data_source=data_source,
             runtime_ms=runtime_ms,
             metrics=BacktestMetrics(
                 initial_balance=float(result.initial_balance),

@@ -22,7 +22,7 @@ class AlertCreate(BaseModel):
 
 class Alert(BaseModel):
     id: str
-    user_id: str = "user-demo-001"
+    user_id: str = "anonymous"
     symbol: str
     alert_type: str
     threshold_value: float

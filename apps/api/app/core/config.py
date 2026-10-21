@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     # Market Data Providers (twelvedata, yahoo, finnhub, oanda, fake)
     MARKET_DATA_PROVIDER: str = "twelvedata"
+    # Real quotes/candles from Yahoo Finance (Twelve Data fallback). Tests switch this off for offline runs.
+    LIVE_MARKET_DATA: bool = True
+    LIVE_QUOTE_REFRESH_SECONDS: float = 5.0
     TWELVEDATA_API_KEY: Optional[str] = None
     FINNHUB_API_KEY: Optional[str] = None
     OANDA_API_KEY: Optional[str] = None

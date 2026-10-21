@@ -30,7 +30,7 @@ async def get_live_ticks() -> ApiResponse[dict]:
 
 
 @router.get("/candles/{symbol}", response_model=ApiResponse[List[Candle]])
-async def get_candles(
+def get_candles(
     symbol: str,
     timeframe: str = Query(default="H1", description="M1, M5, M15, M30, H1, H4, D1"),
     limit: int = Query(default=100, ge=1, le=500),

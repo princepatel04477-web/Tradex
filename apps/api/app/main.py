@@ -26,8 +26,8 @@ from app.services.trading_service import trading_service
 
 
 async def market_heartbeat(interval_seconds: float = 1.0) -> None:
-    """Single server-side tick loop: advances the feed, re-marks positions and evaluates alerts once per
-    tick, independent of how many WebSocket clients are connected (alerts fire with no browser open)."""
+    """Single server-side tick loop: re-marks positions and evaluates alerts once per tick, independent of
+    how many WebSocket clients are connected (alerts fire with no browser open)."""
     while True:
         try:
             market_service.update_ticks()
@@ -40,14 +40,40 @@ async def market_heartbeat(interval_seconds: float = 1.0) -> None:
         await asyncio.sleep(interval_seconds)
 
 
+async def live_quote_refresher() -> None:
+    """Pulls real FX quotes on a fixed cadence in a worker thread so the event loop never blocks."""
+    while True:
+        try:
+            await asyncio.to_thread(market_service.refresh_quotes)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"Live quote refresh failed: {exc}")
+        await asyncio.sleep(settings.LIVE_QUOTE_REFRESH_SECONDS)
+
+
+async def warm_candle_cache() -> None:
+    """Prefetch real candles for the timeframes the UI opens first, so first page loads are fast."""
+    for tf in ("H1", "H4", "D1", "M15"):
+        for sym in list(market_service.prices.keys()):
+            try:
+                await asyncio.to_thread(market_service.get_candles, sym, tf, 250)
+            except Exception as exc:
+                logger.warning(f"Candle warm-up failed for {sym} {tf}: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} [{settings.APP_ENV}]")
     await init_db_pool()
-    heartbeat = asyncio.create_task(market_heartbeat())
+    tasks = [asyncio.create_task(market_heartbeat())]
+    if market_service.live:
+        tasks.append(asyncio.create_task(live_quote_refresher()))
+        tasks.append(asyncio.create_task(warm_candle_cache()))
     yield
     logger.info("Shutting down Tradly API...")
-    heartbeat.cancel()
+    for task in tasks:
+        task.cancel()
     await close_db_pool()
 
 
@@ -96,7 +122,7 @@ async def health_check() -> ApiResponse[dict]:
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected" if get_db_pool() else "in_memory_fallback",
-        "market_provider": settings.MARKET_DATA_PROVIDER,
+        "market_data": market_service.data_status(),
     })
 
 

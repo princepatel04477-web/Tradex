@@ -317,20 +317,86 @@ def journal_out(entry: JournalEntry) -> api.JournalEntryOut:
 # ---------------------------------------------------------------------------
 
 
+#: Live-market datasets: every pair the strategy page can analyse on real candles.
+LIVE_PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "AUD_USD", "USD_CAD", "USD_CHF", "NZD_USD", "EUR_GBP", "EUR_JPY", "GBP_JPY"]
+LIVE_PREFIX = "live_"
+
+
+def _live_strategy_candles(symbol: str, timeframe: str) -> List[Candle]:
+    """Real candles (Yahoo Finance) for a strategy timeframe label (1W, 1D, 4H, 2H, 1H, 30M, 15M)."""
+    from datetime import timedelta
+
+    from app.providers.live_feed import live_feed, merge_buckets, resample
+
+    if timeframe == "1W":
+        daily = live_feed.fetch_candles(symbol, "D1", history=True)[-1500:]
+        bars = merge_buckets(
+            [b.__class__(b.time, b.open, b.high, b.low, b.close, b.volume) for b in daily],
+            lambda t: (t - timedelta(days=t.weekday())).replace(hour=0, minute=0, second=0, microsecond=0),
+        )
+    elif timeframe == "2H":
+        hourly = live_feed.fetch_candles(symbol, "H1")
+        bars = resample([b.__class__(b.time, b.open, b.high, b.low, b.close, b.volume) for b in hourly], 120)
+    else:
+        tf_map = {"1D": "D1", "4H": "H4", "1H": "H1", "30M": "M30", "15M": "M15"}
+        if timeframe not in tf_map:
+            raise ValueError(f"Unsupported timeframe {timeframe}")
+        bars = live_feed.fetch_candles(symbol, tf_map[timeframe])
+    return [Candle(time=b.time, open=b.open, high=b.high, low=b.low, close=b.close, volume=float(b.volume)) for b in bars]
+
+
 class StrategyService:
     """Orchestrates data loading and calls into the engine."""
 
     # -- data ------------------------------------------------------------
 
+    @staticmethod
+    def _live_mode() -> bool:
+        from app.core.config import settings
+
+        return settings.LIVE_MARKET_DATA
+
+    def _symbol(self, scenario_key: str) -> str:
+        if scenario_key.startswith(LIVE_PREFIX):
+            symbol = scenario_key[len(LIVE_PREFIX):].upper()
+            if symbol not in LIVE_PAIRS:
+                raise KeyError(f"Unknown live dataset {scenario_key!r}")
+            return symbol
+        return sample_data.get_scenario(scenario_key).symbol
+
     def scenarios(self) -> List[api.ScenarioOut]:
+        if self._live_mode():
+            return [
+                api.ScenarioOut(
+                    key=f"{LIVE_PREFIX}{sym.lower()}",
+                    symbol=sym,
+                    title=f"{sym.replace('_', '/')} - live market (real candles)",
+                    description=(
+                        f"Real {sym.replace('_', '/')} price history from Yahoo Finance across the weekly, daily, "
+                        "4H, 2H, 1H, 30M and 15M timeframes. The engine runs the full top-down pass on current market data."
+                    ),
+                    demonstrates=["Live market structure", "Real AOI zones", "Current trend alignment"],
+                )
+                for sym in LIVE_PAIRS
+            ]
         return [api.ScenarioOut(**s) for s in sample_data.list_scenarios()]
 
     def load_candles(
         self, scenario_key: str, timeframes: Optional[List[str]] = None
     ) -> Dict[str, List[Candle]]:
-        """Candles for a scenario - live data when enabled, sample otherwise."""
-        scenario = sample_data.get_scenario(scenario_key)
+        """Candles for a dataset - real market candles for live datasets, bundled sample otherwise."""
         tfs = timeframes or list(sample_data.TIMEFRAME_HOURS.keys())
+        if scenario_key.startswith(LIVE_PREFIX):
+            from app.core.errors import ProviderUnavailableError
+            from app.providers.live_feed import LiveDataUnavailable
+
+            symbol = self._symbol(scenario_key)
+            try:
+                return {tf: _live_strategy_candles(symbol, tf) for tf in tfs}
+            except LiveDataUnavailable as exc:
+                raise ProviderUnavailableError("Live market data", str(exc)) from exc
+
+        scenario = sample_data.get_scenario(scenario_key)
 
         if live_data_enabled():
             live: Dict[str, List[Candle]] = {}
@@ -347,11 +413,11 @@ class StrategyService:
     def candle_series(
         self, scenario_key: str, timeframe: str, limit: int = 300
     ) -> api.CandleSeries:
-        scenario = sample_data.get_scenario(scenario_key)
+        symbol = self._symbol(scenario_key)
         candles = self.load_candles(scenario_key, [timeframe])[timeframe]
         tail = candles[-limit:]
         return api.CandleSeries(
-            symbol=scenario.symbol,
+            symbol=symbol,
             timeframe=timeframe,
             candles=[candle_out(c) for c in tail],
             count=len(tail),
@@ -370,10 +436,10 @@ class StrategyService:
         entry_timeframe: str = "1H",
     ) -> api.AnalysisOut:
         """Full top-down pass over a bundled sample scenario."""
-        scenario = sample_data.get_scenario(scenario_key)
+        symbol = self._symbol(scenario_key)
         candles = self.load_candles(scenario_key)
         return self._analyse(
-            scenario.symbol, candles, account_size, entry_timeframe
+            symbol, candles, account_size, entry_timeframe
         )
 
     def analyse_uploaded(self, request: api.AnalysisRequest) -> api.AnalysisOut:
@@ -491,11 +557,11 @@ class StrategyService:
         return structure_out(result, point.price if point else None)
 
     def aoi_for(self, scenario_key: str, timeframe: str) -> api.AOIScanOut:
-        scenario = sample_data.get_scenario(scenario_key)
+        symbol = self._symbol(scenario_key)
         candles = self.load_candles(scenario_key, [timeframe])[timeframe]
         structure = analyse_structure(candles, timeframe)
         return scan_out(
-            detect_aoi_zones(candles, timeframe, scenario.symbol, structure)
+            detect_aoi_zones(candles, timeframe, symbol, structure)
         )
 
     def ema_for(self, scenario_key: str, timeframe: str, period: int) -> api.EMAOut:

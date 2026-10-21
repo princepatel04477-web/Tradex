@@ -8,11 +8,10 @@ import random
 from app.domain.pips import get_pip_size, price_diff_to_pips
 from app.domain.sessions import get_market_sessions_overview
 from app.core.config import settings
-from app.providers.base import MarketDataProvider, MarketTick
-from app.providers.fakes import FakeMarketDataProvider, BASE_PRICES
-from app.providers.yfinance_provider import YahooFinanceProvider
-from app.providers.finnhub import FinnhubProvider
-from app.providers.twelvedata import TwelveDataProvider
+from app.core.errors import ProviderUnavailableError
+from app.core.logging import logger
+from app.providers.base import MarketDataProvider
+from app.providers.live_feed import OHLC, LiveDataUnavailable, live_feed
 from app.schemas.market import Candle, CurrencyPair, MarketSessionOverview, Tick
 
 PAIRS_METADATA = [
@@ -35,43 +34,91 @@ PAIRS_METADATA = [
 
 
 class MarketService:
-    def __init__(self, provider: Optional[MarketDataProvider] = None):
-        if provider:
-            self.provider = provider
-        elif settings.MARKET_DATA_PROVIDER == "twelvedata":
-            self.provider = TwelveDataProvider()
-        elif settings.MARKET_DATA_PROVIDER == "yahoo":
-            self.provider = YahooFinanceProvider()
-        elif settings.MARKET_DATA_PROVIDER == "finnhub":
-            self.provider = FinnhubProvider()
-        else:
-            self.provider = FakeMarketDataProvider()
+    """Market state backed by real FX quotes and candles (Yahoo Finance, Twelve Data fallback).
+
+    ``prices`` holds the latest real mid per pair; bid/ask are the mid +/- the pair's typical retail spread.
+    When ``settings.LIVE_MARKET_DATA`` is off (offline test runs) prices stay at the registry reference
+    levels and candles come from a local generator.
+    """
+
+    def __init__(self, provider: Optional[MarketDataProvider] = None, live: Optional[bool] = None):
+        self.provider = provider
+        self.live = settings.LIVE_MARKET_DATA if live is None else live
         self.prices: Dict[str, dict] = {}
         self.candles_cache: Dict[str, Dict[str, List[Candle]]] = {}
+        self.last_quote_refresh: Optional[datetime] = None
+        self.last_quote_error: Optional[str] = None
         self._init_market_state()
+        if self.live:
+            self.refresh_quotes()
 
     def _init_market_state(self):
         for cfg in PAIRS_METADATA:
             sym = cfg["symbol"]
             pip_sz = get_pip_size(sym)
             mid = cfg["base_price"]
-            spread = cfg["spread_pips"] * pip_sz
-            bid = mid - (spread / Decimal("2"))
-            ask = mid + (spread / Decimal("2"))
             self.prices[sym] = {
                 "config": cfg,
                 "mid": mid,
-                "bid": bid,
-                "ask": ask,
+                "bid": mid,
+                "ask": mid,
                 "pip_size": pip_sz,
-                "high_24h": mid * Decimal("1.006"),
-                "low_24h": mid * Decimal("0.994"),
+                "high_24h": mid,
+                "low_24h": mid,
                 "open_24h": mid,
                 "last_update": datetime.now(timezone.utc),
+                "market_time": None,
             }
+            self._set_mid(sym, mid)
             self.candles_cache[sym] = {}
-            for tf in ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]:
-                self.candles_cache[sym][tf] = self._generate_seed_candles(sym, tf)
+
+    def _set_mid(self, sym: str, mid: Decimal) -> None:
+        d = self.prices[sym]
+        half_spread = (d["config"]["spread_pips"] * d["pip_size"]) / Decimal("2")
+        d["mid"] = mid
+        d["bid"] = mid - half_spread
+        d["ask"] = mid + half_spread
+
+    # ------------------------------------------------------------------ live quotes
+    def refresh_quotes(self) -> int:
+        """Pull the latest real quotes for every pair. Blocking - run it from a worker thread."""
+        try:
+            quotes = live_feed.fetch_quotes(list(self.prices.keys()))
+        except Exception as exc:  # never let a provider hiccup kill the heartbeat
+            self.last_quote_error = str(exc)
+            logger.warning(f"Live quote refresh failed: {exc}")
+            return 0
+        now = datetime.now(timezone.utc)
+        for sym, q in quotes.items():
+            if sym not in self.prices or q.price <= 0:
+                continue
+            d = self.prices[sym]
+            decimals = d["config"]["pip_decimals"] + 1
+            mid = Decimal(str(round(q.price, decimals)))
+            self._set_mid(sym, mid)
+            if q.previous_close:
+                d["open_24h"] = Decimal(str(q.previous_close))
+            elif d["market_time"] is None:
+                d["open_24h"] = mid
+            d["high_24h"] = Decimal(str(max(q.day_high or q.price, q.price)))
+            d["low_24h"] = Decimal(str(min(q.day_low or q.price, q.price)))
+            d["last_update"] = now
+            d["market_time"] = q.market_time
+        if quotes:
+            self.last_quote_refresh = now
+            self.last_quote_error = None
+        else:
+            self.last_quote_error = "No quotes returned by live providers"
+        return len(quotes)
+
+    def data_status(self) -> dict:
+        return {
+            "mode": "live" if self.live else "offline",
+            "source": "Yahoo Finance (Twelve Data fallback)" if self.live else "offline test generator",
+            "last_quote_refresh": self.last_quote_refresh.isoformat() if self.last_quote_refresh else None,
+            "pairs_with_live_quotes": sum(1 for d in self.prices.values() if d["market_time"] is not None),
+            "last_error": self.last_quote_error,
+        }
 
     def get_all_pairs(self) -> List[CurrencyPair]:
         result = []
@@ -80,7 +127,7 @@ class MarketService:
             cfg = d["config"]
             mid = d["mid"]
             open_24h = d["open_24h"]
-            chg = round(float((mid - open_24h) / open_24h * 100), 2)
+            chg = round(float((mid - open_24h) / open_24h * 100), 2) if open_24h else 0.0
             result.append(
                 CurrencyPair(
                     symbol=sym,
@@ -96,48 +143,25 @@ class MarketService:
                     change_24h_pct=chg,
                     high_24h=float(d["high_24h"]),
                     low_24h=float(d["low_24h"]),
-                    timestamp=now,
+                    timestamp=d["market_time"] or now,
                 )
             )
         return result
 
     def get_pair(self, symbol: str) -> Optional[CurrencyPair]:
         all_p = self.get_all_pairs()
-        sym_norm = symbol.replace("/", "_")
+        sym_norm = symbol.replace("/", "_").upper()
         for p in all_p:
             if p.symbol == sym_norm:
                 return p
         return None
 
     def update_ticks(self) -> Dict[str, Tick]:
-        now = datetime.now(timezone.utc)
-        ticks = {}
-        for sym, d in self.prices.items():
-            cfg = d["config"]
-            pip_sz = d["pip_size"]
-            shift = Decimal(str(round(random.uniform(-1.2, 1.2), 4))) * pip_sz
-            new_mid = d["mid"] + shift
-            half_spread = (cfg["spread_pips"] * pip_sz) / Decimal("2")
-            bid = new_mid - half_spread
-            ask = new_mid + half_spread
-            d["mid"] = new_mid
-            d["bid"] = bid
-            d["ask"] = ask
-            d["high_24h"] = max(d["high_24h"], new_mid)
-            d["low_24h"] = min(d["low_24h"], new_mid)
-            d["last_update"] = now
-
-            ticks[sym] = Tick(
-                symbol=sym,
-                bid=float(bid),
-                ask=float(ask),
-                spread_pips=float(cfg["spread_pips"]),
-                timestamp=now,
-            )
-        return ticks
+        """Current real quotes. Prices change only when the live refresh pulls a new quote."""
+        return self.latest_ticks()
 
     def latest_ticks(self) -> Dict[str, Tick]:
-        """Current bid/ask per pair without advancing the simulated feed (read-only snapshot)."""
+        """Current bid/ask per pair (read-only snapshot)."""
         return {
             sym: Tick(
                 symbol=sym,
@@ -150,36 +174,72 @@ class MarketService:
         }
 
     def get_candles(self, symbol: str, timeframe: str = "H1", limit: int = 100) -> List[Candle]:
-        sym = symbol.replace("/", "_")
-        if sym not in self.candles_cache or timeframe not in self.candles_cache[sym]:
-            return self._generate_seed_candles(sym, timeframe, count=limit)
-        return self.candles_cache[sym][timeframe][-limit:]
+        sym = symbol.replace("/", "_").upper()
+        tf = timeframe.upper()
+        if not self.live:
+            if sym not in self.candles_cache:
+                self.candles_cache[sym] = {}
+            if tf not in self.candles_cache[sym] or len(self.candles_cache[sym][tf]) < limit:
+                self.candles_cache[sym][tf] = self._generate_offline_candles(sym, tf, count=max(limit, 200))
+            return self.candles_cache[sym][tf][-limit:]
 
-    def _generate_seed_candles(self, symbol: str, timeframe: str, count: int = 200) -> List[Candle]:
+        try:
+            bars = live_feed.fetch_candles(sym, tf)
+        except LiveDataUnavailable as exc:
+            raise ProviderUnavailableError("Live market data", str(exc)) from exc
+        decimals = (2 if "JPY" in sym else 4) + 1
+        candles = [
+            Candle(
+                symbol=sym,
+                timeframe=tf,
+                open_time=b.time,
+                open=round(b.open, decimals),
+                high=round(b.high, decimals),
+                low=round(b.low, decimals),
+                close=round(b.close, decimals),
+                volume=b.volume,
+            )
+            for b in bars[-limit:]
+        ]
+        # Fold the latest real quote into the forming bar so charts track the live price between refreshes.
+        d = self.prices.get(sym)
+        if candles and d and d["market_time"] is not None and d["market_time"] >= candles[-1].open_time:
+            last = candles[-1]
+            mid = float(d["mid"])
+            candles[-1] = last.model_copy(update={"close": mid, "high": max(last.high, mid), "low": min(last.low, mid)})
+        return candles
+
+    def get_history_bars(self, symbol: str, timeframe: str) -> List[OHLC]:
+        """Deep real history for the backtest engine."""
+        try:
+            return live_feed.fetch_candles(symbol.replace("/", "_").upper(), timeframe.upper(), history=True)
+        except LiveDataUnavailable as exc:
+            raise ProviderUnavailableError("Live market data", str(exc)) from exc
+
+    def _generate_offline_candles(self, symbol: str, timeframe: str, count: int = 200) -> List[Candle]:
+        """Offline-only generator used when LIVE_MARKET_DATA is disabled (unit tests / CI without network)."""
         cfg = next((c for c in PAIRS_METADATA if c["symbol"] == symbol), PAIRS_METADATA[0])
         pip_sz = float(get_pip_size(symbol))
         base_p = float(cfg["base_price"])
         now = datetime.now(timezone.utc)
+        rng = random.Random(f"{symbol}|{timeframe}")
         candles = []
         curr = base_p
 
         minutes_map = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
         step = minutes_map.get(timeframe, 60)
         step_delta = timedelta(minutes=step)
-        # Align the latest bar to the timeframe boundary so open_time is strictly increasing.
         epoch_min = int(now.timestamp() // 60)
         last_open = datetime.fromtimestamp((epoch_min - epoch_min % step) * 60, tz=timezone.utc)
-        # Per-bar volatility scales with the square root of bar duration (H1 baseline ≈ 5–20 pips).
         vol_scale = (step / 60) ** 0.5
 
         for i in range(count, 0, -1):
-            vol = random.uniform(5, 20) * pip_sz * vol_scale
-            chg = random.uniform(-vol, vol)
+            vol = rng.uniform(5, 20) * pip_sz * vol_scale
+            chg = rng.uniform(-vol, vol)
             c_open = curr
             c_close = curr + chg
-            c_high = max(c_open, c_close) + random.uniform(0, vol * 0.7)
-            c_low = min(c_open, c_close) - random.uniform(0, vol * 0.7)
-
+            c_high = max(c_open, c_close) + rng.uniform(0, vol * 0.7)
+            c_low = min(c_open, c_close) - rng.uniform(0, vol * 0.7)
             candles.append(
                 Candle(
                     symbol=symbol,
@@ -189,7 +249,7 @@ class MarketService:
                     high=round(c_high, cfg["pip_decimals"] + 1),
                     low=round(c_low, cfg["pip_decimals"] + 1),
                     close=round(c_close, cfg["pip_decimals"] + 1),
-                    volume=random.randint(500, 3000),
+                    volume=rng.randint(500, 3000),
                 )
             )
             curr = c_close
