@@ -1,5 +1,9 @@
 # TRADLY (Tradex) — Final Prototype Submission Guide
 
+> **Live app:** https://tradex-main.vercel.app  ·  **API:** https://tradex-api-q7re.onrender.com (docs at `/docs`, status at `/health`)
+> **Login:** `princepatel01258@gmail.com` / `Prince_1258`  ·  **Invite code for registering new users:** `TRADLY_PRINCE_2026`
+> Open the site ~2 minutes before presenting so the free-tier API is awake.
+
 **Student:** Prince Jivani · **Enrollment:** 23SE02CS030 · **Host:** ThinkNovus Private Limited
 **Scope completed in this pass:** Month 3 + Month 4 roadmap items from the Month 2 progress report (§6).
 
@@ -21,7 +25,7 @@
 - Signal on bar close → fill on **next bar open** (no look-ahead). Buys fill at **ask**, sells at **bid** using each pair's spread.
 - ATR-sized stop-loss / take-profit, risk-% position sizing, conservative "stop first" intrabar rule.
 - Outputs: net profit, return %, win rate, profit factor, expectancy, avg R, **Sharpe (annualised)**, **max drawdown**, exposure, equity curve with drawdown shading, full trade ledger, exit breakdown.
-- Data: deterministic, seeded historical dataset (reproducible for grading); D1 bars open at 17:00 New York with DST handled by timezone; bars respect the FX trading week. Up to 3,000 bars (D1 ≈ 5.8 years).
+- Data: **real market history** from Yahoo Finance (mid prices). D1 goes back to 2011, H1/H4 about 2 years, M30 about 60 days. Up to 3,000 most recent closed bars per run.
 
 ### Multi-agent analysis (Month 4)
 - **Technical Analyst** — indicators + composite bias, top-down H1/H4/D1 alignment.
@@ -39,11 +43,11 @@
 | Backend test suite (`pytest`, `apps/api`) | **267 passed**, 0 failed (was 232 before this pass; +35 new tests) |
 | TypeScript (`tsc --noEmit`, `apps/web`) | 0 errors |
 | Production build (`next build`, `apps/web`) | ✅ 14 routes incl. `/backtest`, `/alerts` |
-| Backtest EUR/USD H4, EMA 9/21, 1,500 bars | 53 trades · win 39.6% · PF 1.40 · Sharpe 1.26 · max DD 6.82% · +11.62% · ~15–40 ms |
-| Multi-agent run (EUR/USD H1) | 4 agents, ~8–15 ms deterministic path |
-| Alert crossing → in-app notification (no browser open) | fired within seconds on the live simulated feed |
+| Backtest EUR/USD H4, EMA 9/21, 1,500 real bars (Nov 2025 – Oct 2026) | 58 trades · win 32.8% · PF 0.95 · Sharpe −0.11 · max DD 16.6% · −1.73% · ~80 ms (21 Oct 2026) |
+| Multi-agent run (EUR/USD H1) | 4 agents on live data, ~3–8 s including Groq phrasing |
+| Alert crossing → in-app notification (no browser open) | fires within seconds of the live price crossing |
 
-Simulated / backtested performance does not predict future results.
+Backtested performance does not predict future results. A losing EMA run on real data is expected — it shows the engine is not curve-fitted to a synthetic series.
 
 ---
 
@@ -71,13 +75,27 @@ Run tests: `cd apps/api && pytest -q`
 5. **AI Macro Assistant** → ask "Should I buy EUR/USD?" → it refuses to give a trade instruction (AI-4.2).
 6. **Paper Trading** → place and close a trade → **Performance & Journal**.
 
-## 5. Honest limitations (say these if asked)
-- Historical data is a seeded synthetic dataset, not broker history; the engine only consumes `List[Bar]`, so an OANDA/Twelve Data adapter can replace it.
-- The RAG corpus is a small curated set of central-bank documents; no live vector DB ingestion in this build.
-- Runs, alerts and paper-trading state are in memory (Neon DB used for auth when reachable); restarting the API clears them.
-- LLM phrasing needs a valid `GROQ_API_KEY`; without it the deterministic narrative is shown.
+## 5. Live data sources (no simulated prices anywhere in production)
+| Feature | Source |
+|---|---|
+| Live quotes, all 15 pairs (refreshed every 5 s) | Yahoo Finance FX (Twelve Data fallback) |
+| Candles M1–D1 (H4 built from real H1) | Yahoo Finance FX (Twelve Data fallback) |
+| Backtest history | Yahoo Finance FX, real closed bars |
+| Strategy / Confluence Engine datasets | Real candles for 10 pairs (1W–15M) |
+| News + currency sentiment | FXStreet RSS, Finnhub news, Google News RSS (lexicon scoring) |
+| Economic calendar | ForexFactory weekly calendar (bundled snapshot of the same week if rate-limited) |
+| AI assistant answers | Groq LLM grounded on the retrieved live headlines, with citations |
 
-## 6. New API endpoints
+Check live status any time: `https://tradex-api-q7re.onrender.com/health` → `market_data.mode = "live"`.
+
+## 6. Honest limitations (say these if asked)
+- Bid/ask are the real mid price ± each pair's typical retail spread (Yahoo provides mid quotes, not a broker order book).
+- Sentiment is lexicon-based scoring of live headlines, not a fine-tuned FinBERT model.
+- Runs, alerts and paper-trading state are in memory (Neon DB is used for login); restarting the API clears them.
+- The API is on Render's free tier: after 15 idle minutes it sleeps and the first request takes ~1 minute. A keep-alive pings it 08:30–13:30 IST.
+- Unit tests run offline (`LIVE_MARKET_DATA=false`), so the suite is deterministic and needs no network.
+
+## 7. New API endpoints
 | Method | Path |
 |---|---|
 | GET | `/api/v1/backtest/strategies` |
