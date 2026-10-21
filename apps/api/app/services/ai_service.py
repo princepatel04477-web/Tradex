@@ -202,7 +202,9 @@ class AIService:
                 timestamp=datetime.now(timezone.utc),
             )
 
-        top = matched_chunks[:6]
+        # Prefer dated live headlines; background documents only fill in when live coverage is thin.
+        live_matches = [m for m in matched_chunks if m[1].get("live")]
+        top = live_matches[:6] if len(live_matches) >= 3 else matched_chunks[:6]
         top_score, top_doc = top[0]
         citations = [
             CitationSource(

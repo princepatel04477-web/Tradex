@@ -140,7 +140,7 @@ export default function CommandCenter() {
                 <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
                 <span>15 FX PAIRS STREAMING</span>
               </span>
-              <span className="text-[11px] font-mono text-tradly-muted">Twelve Data Engine</span>
+              <span className="text-[11px] font-mono text-tradly-muted">Live FX Feed · Yahoo Finance</span>
             </div>
 
             <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight font-sans">

@@ -20,6 +20,7 @@ from app.core.errors import TradlyException
 from app.core.logging import logger, set_correlation_id
 from app.core.rate_limit import RateLimitMiddleware
 from app.repositories.base import close_db_pool, init_db_pool, get_db_pool
+from app.services.ai_service import ai_service
 from app.services.alert_service import alert_service
 from app.services.market_service import market_service
 from app.services.trading_service import trading_service
@@ -53,7 +54,12 @@ async def live_quote_refresher() -> None:
 
 
 async def warm_candle_cache() -> None:
-    """Prefetch real candles for the timeframes the UI opens first, so first page loads are fast."""
+    """Prefetch live news, the calendar and real candles so first page loads are fast."""
+    for fn in (ai_service.get_sentiment_overview, ai_service.get_economic_calendar):
+        try:
+            await asyncio.to_thread(fn)
+        except Exception as exc:
+            logger.warning(f"News/calendar warm-up failed: {exc}")
     for tf in ("H1", "H4", "D1", "M15"):
         for sym in list(market_service.prices.keys()):
             try:

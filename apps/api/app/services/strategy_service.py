@@ -370,7 +370,7 @@ class StrategyService:
                 api.ScenarioOut(
                     key=f"{LIVE_PREFIX}{sym.lower()}",
                     symbol=sym,
-                    title=f"{sym.replace('_', '/')} - live market (real candles)",
+                    title="Live market (real candles)",
                     description=(
                         f"Real {sym.replace('_', '/')} price history from Yahoo Finance across the weekly, daily, "
                         "4H, 2H, 1H, 30M and 15M timeframes. The engine runs the full top-down pass on current market data."

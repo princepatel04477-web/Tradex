@@ -335,7 +335,7 @@ class AgentService:
         )
         user = f"Pair: {symbol.replace('_', '/')}\nVerdict: {deterministic}\nFindings:\n" + "\n".join(evidence_lines)
         try:
-            text = await asyncio.wait_for(GroqProvider().generate(system, user, temperature=0.2, max_tokens=220), timeout=9.0)
+            text = await asyncio.wait_for(GroqProvider().generate(system, user, temperature=0.2, max_tokens=600), timeout=12.0)
         except Exception as exc:  # provider down, timeout or quota — degrade to deterministic narrative
             logger.warning(f"Synthesis LLM unavailable ({exc}); using deterministic narrative")
             return None

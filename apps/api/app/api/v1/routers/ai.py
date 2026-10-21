@@ -16,12 +16,12 @@ async def query_rag(req: RAGQueryRequest) -> ApiResponse[RAGQueryResponse]:
 
 
 @router.get("/sentiment", response_model=ApiResponse[SentimentOverview])
-async def get_sentiment_overview() -> ApiResponse[SentimentOverview]:
+def get_sentiment_overview() -> ApiResponse[SentimentOverview]:
     overview = ai_service.get_sentiment_overview()
     return ApiResponse.success(overview)
 
 
 @router.get("/calendar", response_model=ApiResponse[List[EconomicCalendarEvent]])
-async def get_economic_calendar() -> ApiResponse[List[EconomicCalendarEvent]]:
+def get_economic_calendar() -> ApiResponse[List[EconomicCalendarEvent]]:
     calendar = ai_service.get_economic_calendar()
     return ApiResponse.success(calendar)
