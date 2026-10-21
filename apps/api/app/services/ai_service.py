@@ -235,16 +235,20 @@ class AIService:
                 "Never give trade instructions, entry prices, stop levels, lot or position sizes, or tell the user to buy or sell."
             )
             user = f"Question: {req.query}\nPair context: {sym or 'none'}\nToday (UTC): {datetime.now(timezone.utc):%Y-%m-%d}\n\nSources:\n{context}"
-            try:
-                from app.providers.groq import GroqProvider
+            from app.providers.groq import GroqProvider
 
-                text = await asyncio.wait_for(GroqProvider().generate(system, user, temperature=0.2, max_tokens=600), timeout=14.0)
+            for attempt in range(2):  # reasoning models occasionally return an empty reply; retry once
+                try:
+                    text = await asyncio.wait_for(GroqProvider().generate(system, user, temperature=0.2, max_tokens=700), timeout=12.0)
+                except Exception as exc:
+                    logger.warning(f"Groq RAG synthesis failed, using retrieval answer: {exc}")
+                    break
                 text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
                 if text and not contains_trade_instruction(text):
                     answer = text
                     model_used = f"Groq {settings.GROQ_MODEL} + grounded retrieval ({len(top)} sources)"
-            except Exception as exc:
-                logger.warning(f"Groq RAG synthesis failed, using retrieval answer: {exc}")
+                    break
+                logger.warning(f"Groq RAG reply {'rejected by AI-4.2 filter' if text else 'was empty'} (attempt {attempt + 1})")
 
         return RAGQueryResponse(
             query=req.query,
