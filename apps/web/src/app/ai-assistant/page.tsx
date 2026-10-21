@@ -62,7 +62,7 @@ export default function AIAssistantPage() {
         <ShieldAlert className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
         <p className="leading-relaxed">
           <strong className="text-white uppercase tracking-wider font-bold mr-1">Tradly Responsible AI Disclaimer:</strong>
-          All RAG answers, FinBERT sentiment scores, and economic briefings are generated for informational and academic purposes only.
+          All RAG answers, news sentiment scores, and economic briefings are generated for informational and academic purposes only.
           Outputs do NOT constitute financial, investment, or trading advice.
         </p>
       </div>
@@ -76,7 +76,7 @@ export default function AIAssistantPage() {
                 <Bot className="w-5 h-5 text-cyan-400" />
                 <span>RAG Market Intelligence Assistant</span>
               </h2>
-              <span className="text-xs text-tradly-muted font-mono">Groq LLaMA 3 + FinBERT</span>
+              <span className="text-xs text-tradly-muted font-mono">Groq LLM + live news retrieval</span>
             </div>
 
             {/* Input Form */}
@@ -178,16 +178,16 @@ export default function AIAssistantPage() {
           </div>
         </div>
 
-        {/* Right Column: FinBERT Currency Sentiment Heatmap & Economic Calendar */}
+        {/* Right Column: Live News Sentiment Heatmap & Economic Calendar */}
         <div className="lg:col-span-5 space-y-6">
-          {/* FinBERT Currency Sentiment Heatmap */}
+          {/* Live News Currency Sentiment Heatmap */}
           <div className="p-5 rounded-2xl bg-tradly-card border border-tradly-border space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                 <Flame className="w-4 h-4 text-amber-400" />
-                <span>FinBERT Currency Sentiment Score</span>
+                <span>Live News Currency Sentiment</span>
               </h3>
-              <span className="text-[10px] text-tradly-muted">Updated Hourly</span>
+              <span className="text-[10px] text-tradly-muted">FXStreet + Finnhub · 10 min</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -198,7 +198,7 @@ export default function AIAssistantPage() {
                 >
                   <div>
                     <div className="font-extrabold text-sm text-white">{s.currency}</div>
-                    <div className="text-[10px] text-tradly-muted">{s.article_count} news feeds</div>
+                    <div className="text-[10px] text-tradly-muted">{s.article_count} headlines</div>
                   </div>
                   <div className="text-right">
                     <div
@@ -224,12 +224,12 @@ export default function AIAssistantPage() {
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                 <Calendar className="w-4 h-4 text-cyan-400" />
-                <span>High-Impact Economic Calendar</span>
+                <span>Economic Calendar · This Week</span>
               </h3>
             </div>
 
             <div className="space-y-2.5">
-              {calendar.map((evt) => {
+              {calendar.slice(0, 12).map((evt) => {
                 const isExpanded = expandedBriefing === evt.id;
                 return (
                   <div
@@ -238,15 +238,32 @@ export default function AIAssistantPage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white">{evt.title}</span>
-                      <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                      <span
+                        className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                          evt.impact === "High"
+                            ? "bg-red-500/20 text-red-400 border-red-500/30"
+                            : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                        }`}
+                      >
                         {evt.impact} Impact
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-tradly-muted font-mono text-[11px]">
                       <span>Curr: <strong className="text-white">{evt.currency}</strong></span>
-                      <span>Consensus: <strong className="text-cyan-400">{evt.consensus}</strong></span>
-                      <span>Previous: {evt.previous}</span>
+                      <span>Forecast: <strong className="text-cyan-400">{evt.consensus || "—"}</strong></span>
+                      <span>Previous: {evt.previous || "—"}</span>
+                    </div>
+                    <div className="text-[10px] text-tradly-muted font-mono">
+                      {new Date(evt.scheduled_at).toLocaleString(undefined, {
+                        weekday: "short",
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      {new Date(evt.scheduled_at).getTime() > Date.now() ? " · upcoming" : " · released"}
+                      {evt.actual ? ` · Actual: ${evt.actual}` : ""}
                     </div>
 
                     {evt.ai_briefing && (
@@ -256,7 +273,7 @@ export default function AIAssistantPage() {
                           className="text-[11px] text-cyan-400 hover:underline font-semibold flex items-center space-x-1"
                         >
                           <FileText className="w-3 h-3" />
-                          <span>{isExpanded ? "Hide AI Volatility Briefing" : "Expand AI Volatility Briefing"}</span>
+                          <span>{isExpanded ? "Hide Event Briefing" : "Expand Event Briefing"}</span>
                         </button>
 
                         {isExpanded && (
